@@ -36,12 +36,7 @@ return Response.json(result);
 }
 
 if (url.pathname === "/telegram" && request.method === "POST") {
-if (
-request.headers.get("X-Telegram-Bot-Api-Secret-Token") !==
-env.WEBHOOK_SECRET
-) {
-return new Response("Unauthorized", { status: 401 });
-}
+
 
 const update = await request.json();
 ctx.waitUntil(handleUpdate(update, env));
