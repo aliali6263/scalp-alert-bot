@@ -766,3 +766,4 @@ return Number(number).toLocaleString("en-US", {
 maximumFractionDigits: 6
 });
 }
+
