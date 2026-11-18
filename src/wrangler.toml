@@ -1,1 +1,7 @@
+name = "scalp-alert-bot"
+main = "index.js"
+compatibility_date = "2026-11-18"
 
+[[kv_namespaces]]
+binding = "BOT_STATE"
+id = "1548c5b306c94e19a0b21bdd809db2b5"
