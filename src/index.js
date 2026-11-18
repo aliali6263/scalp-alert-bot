@@ -39,7 +39,7 @@ if (url.pathname === "/telegram" && request.method === "POST") {
 
 
 const update = await request.json();
-ctx.waitUntil(handleUpdate(update, env));
+ctx.waitUntil(handleUpdate(update, env).catch(error => console.error("HANDLE UPDATE ERROR:", error)));
 
 return Response.json({ ok: true });
 }
