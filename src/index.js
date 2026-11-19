@@ -1,4 +1,3 @@
-
 const TELEGRAM_API = "https://api.telegram.org";
 const TRUE_API = "https://apiv2.thetruetrade.io";
 
@@ -28,9 +27,6 @@ VOLUME: 10,
 ORDERBOOK: 10,
 SUPPORT: 10
 };
-
-// ATR شاخص نوسان است، نه جهت بازار؛
-// بنابراین در رأی صعودی و نزولی دخالت داده نمی‌شود.
 
 const MAX_DIRECTIONAL_WEIGHT = Object.values(WEIGHTS)
 .reduce((sum, weight) => sum + weight, 0);
@@ -624,7 +620,9 @@ direction,
 available: true,
 ratio,
 recentVol,
-previousVol
+previousVol,
+upVolume,
+downVolume
 };
 }
 
@@ -694,10 +692,187 @@ return null;
 }
 
 // ===============================
+// CONDITIONAL ENTRY PLAN
+// ===============================
+
+// فقط کندل‌هایی که زمان بسته‌شدنشان گذشته است.
+function getClosedCandles(candles, timeframe) {
+const seconds = TIMEFRAMES[timeframe];
+
+if (!seconds) return [];
+
+const now = Math.floor(Date.now() / 1000);
+
+return candles.filter(c =>
+c.time + seconds <= now
+);
+}
+
+function buildEntryPlan(candles, timeframe) {
+const closed = getClosedCandles(candles, timeframe);
+
+if (closed.length < 50) {
+return null;
+}
+
+// آخرین کندل بسته‌شده، کندل بررسی تأیید است.
+const confirmationCandle = closed.at(-1);
+
+// ۲۰ کندل قبل از کندل تأیید برای تعیین سطح شکست.
+const referenceCandles = closed.slice(-21, -1);
+
+if (referenceCandles.length < 20) {
+return null;
+}
+
+const previousHigh = Math.max(
+...referenceCandles.map(c => c.high)
+);
+
+const previousLow = Math.min(
+...referenceCandles.map(c => c.low)
+);
+
+const atr = calculateATR(closed);
+
+if (!Number.isFinite(atr) || atr <= 0) {
+return null;
+}
+
+// فاصله کوچک برای جلوگیری از شکست‌های بسیار جزئی.
+const buffer = Math.max(
+atr * 0.05,
+confirmationCandle.close * 0.0001
+);
+
+const longLevel = previousHigh + buffer;
+const shortLevel = previousLow - buffer;
+
+const closes = closed.map(c => c.close);
+const macd = calculateMACD(closes);
+const volume = analyzeVolume(closed);
+
+const longPriceConfirmed =
+confirmationCandle.close > longLevel;
+
+const shortPriceConfirmed =
+confirmationCandle.close < shortLevel;
+
+const longMacdConfirmed =
+macd.histogram > 0 &&
+macd.histogram > macd.previousHistogram;
+
+const shortMacdConfirmed =
+macd.histogram < 0 &&
+macd.histogram < macd.previousHistogram;
+
+const longVolumeConfirmed =
+volume.available &&
+volume.direction === 1;
+
+const shortVolumeConfirmed =
+volume.available &&
+volume.direction === -1;
+
+const longConfirmed =
+longPriceConfirmed &&
+longMacdConfirmed &&
+longVolumeConfirmed;
+
+const shortConfirmed =
+shortPriceConfirmed &&
+shortMacdConfirmed &&
+shortVolumeConfirmed;
+
+return {
+longLevel,
+shortLevel,
+previousHigh,
+previousLow,
+close: confirmationCandle.close,
+candleTime: confirmationCandle.time,
+longPriceConfirmed,
+shortPriceConfirmed,
+longMacdConfirmed,
+shortMacdConfirmed,
+longVolumeConfirmed,
+shortVolumeConfirmed,
+longConfirmed,
+shortConfirmed,
+volumeAvailable: volume.available,
+volumeRatio: volume.ratio,
+macdHistogram: macd.histogram,
+previousMacdHistogram: macd.previousHistogram
+};
+}
+
+function entryPlanText(plan) {
+if (!plan) {
+return `🎯 ورود شرطی
+
+⚠️ داده کافی از کندل‌های بسته‌شده برای تعیین سطح ورود وجود ندارد.`;
+}
+
+const longStatus = plan.longConfirmed
+? "🟢 تأیید کامل شرایط LONG"
+: plan.longPriceConfirmed
+? "🟡 شکست قیمت انجام شده؛ تأییدهای دیگر کامل نیست"
+: "⏳ هنوز منتظر شکست و بسته‌شدن کندل هستیم";
+
+const shortStatus = plan.shortConfirmed
+? "🔴 تأیید کامل شرایط SHORT"
+: plan.shortPriceConfirmed
+? "🟡 شکست قیمت انجام شده؛ تأییدهای دیگر کامل نیست"
+: "⏳ هنوز منتظر شکست و بسته‌شدن کندل هستیم";
+
+const longChecks = [
+`• بسته‌شدن کندل بالای سطح: ${plan.longPriceConfirmed ? "✅" : "❌"}`,
+`• تأیید MACD صعودی: ${plan.longMacdConfirmed ? "✅" : "❌"}`,
+`• تأیید حجم خرید: ${plan.longVolumeConfirmed ? "✅" : "❌"}`
+].join("\n");
+
+const shortChecks = [
+`• بسته‌شدن کندل زیر سطح: ${plan.shortPriceConfirmed ? "✅" : "❌"}`,
+`• تأیید MACD نزولی: ${plan.shortMacdConfirmed ? "✅" : "❌"}`,
+`• تأیید حجم فروش: ${plan.shortVolumeConfirmed ? "✅" : "❌"}`
+].join("\n");
+
+return `🎯 سطوح ورود شرطی
+
+🟢 سناریوی LONG
+قیمت فعال‌سازی: ${format(plan.longLevel)}
+سطح شکست قبلی: ${format(plan.previousHigh)}
+وضعیت: ${longStatus}
+
+${longChecks}
+
+🔴 سناریوی SHORT
+قیمت فعال‌سازی: ${format(plan.shortLevel)}
+سطح شکست قبلی: ${format(plan.previousLow)}
+وضعیت: ${shortStatus}
+
+${shortChecks}
+
+📌 قوانین ورود:
+۱. قیمت باید از سطح مشخص‌شده عبور کند.
+۲. کندل تایم‌فریم انتخابی باید آن سوی سطح بسته شود.
+۳. MACD باید جهت شکست را تأیید کند.
+۴. حجم معاملات نیز باید همان جهت را تأیید کند.
+
+${!plan.volumeAvailable
+? "⚠️ داده حجم معتبر نیست؛ بنابراین شرط حجم تأیید نشده است."
+: `نسبت حجم اخیر به قبل: ${format(plan.volumeRatio)} برابر`}
+
+قیمت آخرین کندل بسته‌شده: ${format(plan.close)}
+
+⚠️ اگر همه شروط تأیید نشوند، ورود انجام نده.`;
+}
+
+// ===============================
 // COMMON ANALYSIS ENGINE
 // ===============================
 
-function analyze(candles, orderBook) {
+function analyze(candles, orderBook, timeframe) {
 const closes = candles.map(c => c.close);
 const price = closes.at(-1);
 
@@ -716,6 +891,8 @@ const recentLow = Math.min(...recent.map(c => c.low));
 const structure = analyzeStructure(candles, price);
 const fib = analyzeFib(candles, price, structure.direction);
 const volume = analyzeVolume(candles);
+
+const entryPlan = buildEntryPlan(candles, timeframe);
 
 const signals = [];
 
@@ -779,7 +956,7 @@ WEIGHTS.STRUCTURE,
 structure.text
 );
 
-// SMC: فقط شکار نقدینگی واقعی در کندل اخیر
+// SMC: شکار نقدینگی
 
 const last = candles.at(-1);
 const prior = candles.slice(-21, -1);
@@ -860,7 +1037,7 @@ WEIGHTS.SUPPORT,
 "موقعیت نسبت به سقف و کف اخیر"
 );
 
-// ATR is a volatility filter, not a directional vote.
+// ATR فقط فیلتر نوسان است.
 
 const volatilityRatio = price > 0 ? atr / price : 0;
 
@@ -869,9 +1046,7 @@ atr > 0 && volatilityRatio < 0.01
 ? "نوسان در محدوده قابل بررسی"
 : "نوسان بالا یا شرایط نامناسب";
 
-// ===============================
 // WEIGHTED CALCULATION
-// ===============================
 
 const totalWeight = signals.reduce(
 (sum, item) => sum + item.weight,
@@ -907,12 +1082,6 @@ const coveragePercent = Math.round(
 totalWeight / MAX_DIRECTIONAL_WEIGHT * 100
 );
 
-const difference = Math.abs(
-upPercent - downPercent
-);
-
-// حداقل چهار روش معتبر و حداقل ۴۰٪ پوشش وزن لازم است.
-
 let direction = "NO TRADE";
 
 if (
@@ -931,19 +1100,10 @@ downPercent - upPercent >= 18
 direction = "SHORT";
 }
 
-const strength = Math.max(
-upPercent,
-downPercent
-);
+const strength = Math.max(upPercent, downPercent);
+const opposing = Math.min(upPercent, downPercent);
 
-const opposing = Math.min(
-upPercent,
-downPercent
-);
-
-// ===============================
 // TRADE MANAGEMENT
-// ===============================
 
 let sl = null;
 let targets = [];
@@ -971,7 +1131,6 @@ sl = bullish
 : Math.max(atrStop, swingStop + atr * 0.1);
 
 const risk = Math.abs(price - sl);
-
 const multipliers = [1, 1.8, 2.7, 3.7, 5];
 
 targets = multipliers.map(n =>
@@ -988,7 +1147,6 @@ exits = [15, 20, 20, 20, 25];
 exits = [25, 25, 20, 15, 15];
 }
 } else {
-// اگر ATR معتبر نباشد، ورود صادر نمی‌شود.
 direction = "NO TRADE";
 }
 
@@ -1006,6 +1164,7 @@ structure,
 fib,
 volume,
 orderBook,
+entryPlan,
 signals,
 totalWeight,
 upWeight,
@@ -1022,6 +1181,73 @@ sl,
 targets,
 exits
 };
+}
+
+// ===============================
+// WAIT GUIDANCE
+// ===============================
+
+function waitGuidance(a) {
+const neutral = a.signals.filter(s => s.direction === 0);
+
+const longConditions = {
+"EMA": "EMA20 بالاتر از EMA50 قرار بگیرد و قیمت بالای EMA20 تثبیت شود.",
+"RSI": "RSI به ۵۵ یا بالاتر برسد.",
+"MACD": "هیستوگرام MACD مثبت باشد و از مقدار کندل قبلی بیشتر شود.",
+"Fibonacci": "قیمت به یکی از سطوح فیبوناچی نزدیک شود و ساختار بازار صعودی باشد.",
+"Market Structure": "ساختار سقف و کف بالاتر یا شکست معتبر سقف اخیر شکل بگیرد.",
+"SMC": "قیمت کف قبلی را بشکند و دوباره بالای آن بسته شود.",
+"Volume": "نسبت حجم از ۱٫۱۵ بیشتر شود و حجم کندل‌های صعودی حداقل ۱٫۲ برابر حجم نزولی باشد.",
+"Order Book": "حجم سفارش‌های خرید حداقل ۱٫۲ برابر سفارش‌های فروش شود.",
+"Support/Resistance": "قیمت به کف ۲۰ کندل اخیر نزدیک شود و ساختار بازار نزولی نباشد."
+};
+
+const shortConditions = {
+"EMA": "EMA20 پایین‌تر از EMA50 قرار بگیرد و قیمت زیر EMA20 تثبیت شود.",
+"RSI": "RSI به ۴۵ یا پایین‌تر برسد.",
+"MACD": "هیستوگرام MACD منفی باشد و از مقدار کندل قبلی کمتر شود.",
+"Fibonacci": "قیمت به یکی از سطوح فیبوناچی نزدیک شود و ساختار بازار نزولی باشد.",
+"Market Structure": "ساختار سقف و کف پایین‌تر یا شکست معتبر کف اخیر شکل بگیرد.",
+"SMC": "قیمت سقف قبلی را بشکند و دوباره پایین‌تر از آن بسته شود.",
+"Volume": "نسبت حجم از ۱٫۱۵ بیشتر شود و حجم کندل‌های نزولی حداقل ۱٫۲ برابر حجم صعودی باشد.",
+"Order Book": "حجم سفارش‌های فروش حداقل ۱٫۲ برابر سفارش‌های خرید شود.",
+"Support/Resistance": "قیمت به سقف ۲۰ کندل اخیر نزدیک شود و ساختار بازار صعودی نباشد."
+};
+
+const makeList = conditions => {
+const available = neutral.filter(s => conditions[s.name]);
+
+if (!available.length) {
+return "روش خنثی قابل‌تبدیل مشخصی در داده‌های فعلی وجود ندارد.";
+}
+
+return available
+.sort((x, y) => y.weight - x.weight)
+.map(s => `• ${s.name} (وزن ${s.weight}): ${conditions[s.name]}`)
+.join("\n");
+};
+
+const missingOrderBook = !a.orderBook;
+
+return `🧭 شرایط خروج از WAIT
+
+🟢 برای فعال‌شدن LONG:
+${makeList(longConditions)}
+
+🔴 برای فعال‌شدن SHORT:
+${makeList(shortConditions)}
+
+📌 شرط نهایی صدور سیگنال:
+• سهم شواهد جهت موردنظر حداقل ۵۸٪ باشد.
+• اختلاف شواهد آن جهت با جهت مخالف حداقل ۱۸ واحد درصد باشد.
+• حداقل ۴ روش معتبر و پوشش وزن حداقل ۴۰٪ وجود داشته باشد.
+• ATR معتبر باشد.
+
+${missingOrderBook
+? "⚠️ داده Order Book موجود نیست و در محاسبه رأی لحاظ نشده است."
+: "Order Book در محاسبه لحاظ شده است."}
+
+این شرایط باید در تحلیل بعدی تأیید شوند؛ صرف نزدیک‌شدن قیمت به یک سطح به‌تنهایی سیگنال ورود نیست.`;
 }
 
 // ===============================
@@ -1111,7 +1337,9 @@ ${makeBar("نزولی", a.downPercent)}
 
 قدرت شواهد: ${a.strength}٪
 پوشش وزن روش‌ها: ${a.coveragePercent}٪
-روش‌های قابل محاسبه: ${a.signals.length} از ۹`;
+روش‌های قابل محاسبه: ${a.signals.length} از ۹
+
+${entryPlanText(a.entryPlan)}`;
 
 if (contract) {
 text += `
@@ -1132,7 +1360,7 @@ const entryHigh = a.direction === "LONG"
 
 text += `
 
-🎯 محدوده ورود: ${format(entryLow)} تا ${format(entryHigh)}
+🎯 محدوده ورود بر اساس سیگنال کلی: ${format(entryLow)} تا ${format(entryHigh)}
 🛑 حد ضرر: ${format(a.sl)}
 
 📍 اهداف و تقسیم خروج پویا:
@@ -1152,12 +1380,15 @@ TP5: ${format(a.targets[4])} | ${a.exits[4]}٪
 text += `
 
 ⛔ شواهد برای ورود کافی نیست.
-فعلاً از ورود اجباری خودداری کن.`;
+فعلاً از ورود اجباری خودداری کن.
+
+${waitGuidance(a)}`;
 }
 
 text += `
 
-⚠️ درصدها سهم شواهد تحلیل‌اند، نه احتمال سود.`;
+⚠️ درصدها سهم شواهد تحلیل‌اند، نه احتمال سود.
+⚠️ سطح ورود شرطی با محدوده ورود سیگنال کلی متفاوت است.`;
 
 return text;
 }
@@ -1191,7 +1422,7 @@ a.direction === "LONG"
 ? "🔴 SHORT"
 : "⚪ انتظار";
 
-return `🔬 جزئیات تحلیل ${name}
+let report = `🔬 جزئیات تحلیل ${name}
 
 ⏱ تایم‌فریم: ${timeframe}
 💰 قیمت: ${format(a.price)}
@@ -1241,10 +1472,22 @@ ${a.atrStatus}
 
 ATR در تشخیص جهت رأی نمی‌دهد و فقط برای ارزیابی نوسان و مدیریت ریسک استفاده می‌شود.
 
+${entryPlanText(a.entryPlan)}
+
 CVD واقعی: هنوز پیاده‌سازی نشده است.
-SMC فعلی بر اساس بررسی ساده شکار نقدینگی است و مدل کامل SMC نیست.
+SMC فعلی بر اساس بررسی ساده شکار نقدینگی است و مدل کامل SMC نیست.`;
+
+if (a.direction === "NO TRADE") {
+report += `
+
+${waitGuidance(a)}`;
+}
+
+report += `
 
 ⚠️ درصدها قدرت شواهد هستند، نه احتمال قطعی سود.`;
+
+return report;
 }
 
 // ===============================
@@ -1270,17 +1513,13 @@ for (const asset of assets) {
 try {
 const symbol = SYMBOLS[asset];
 
-// هر تحلیل فقط یک بار داده‌ها را دریافت می‌کند.
-// گزارش اصلی و جزئیات هر دو از تابع analyze مشترک استفاده می‌کنند.
-
 const candles = await getCandles(
 symbol,
 timeframe
 );
 
 const orderBook = await getOrderBook(symbol);
-
-const result = analyze(candles, orderBook);
+const result = analyze(candles, orderBook, timeframe);
 
 const contract = findContract(
 contracts,
