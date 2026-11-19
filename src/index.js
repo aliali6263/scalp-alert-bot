@@ -12,7 +12,6 @@ ETH: "اتریوم"
 };
 
 const TIMEFRAMES = {
-"1": 60,
 "5": 300,
 "15": 900
 };
@@ -90,15 +89,6 @@ const filled = Math.max(0, Math.min(10, Math.round(value / 10)));
 return "█".repeat(filled) + "░".repeat(10 - filled);
 }
 
-function candleTimeText(time) {
-if (!time) return "نامشخص";
-
-return new Date(time * 1000)
-.toISOString()
-.replace("T", " ")
-.slice(0, 16) + " UTC";
-}
-
 // ===============================
 // TELEGRAM MENUS
 // ===============================
@@ -147,7 +137,7 @@ if (btc && eth) return ["BTC", "ETH"];
 if (btc) return ["BTC"];
 if (eth) return ["ETH"];
 
-if (/هر دو|همه ارزها|همه ارزها|همه بازار/.test(s)) {
+if (/هر دو|همه ارزها|همه بازار/.test(s)) {
 return ["BTC", "ETH"];
 }
 
@@ -155,7 +145,7 @@ return [];
 }
 
 function isDetail(text) {
-return /جزئیات|تحلیل کامل|اندیکاتور|توضیح بیشتر/.test(normalize(text));
+return /جزئیات|تحلیل کامل|توضیح بیشتر/.test(normalize(text));
 }
 
 // ===============================
@@ -200,7 +190,6 @@ throw new Error(`ساختار داده تایم‌فریم ${resolution} معت�
 const candles = data.t.map((time, i) => {
 let timestamp = Number(time);
 
-// پشتیبانی از timestamp میلی‌ثانیه‌ای
 if (timestamp > 1000000000000) {
 timestamp = Math.floor(timestamp / 1000);
 }
@@ -247,23 +236,8 @@ return candles.filter(c => c.time + seconds <= now);
 }
 
 // ===============================
-// INDICATORS
+// RSI
 // ===============================
-
-function emaSeries(values, period) {
-if (!values.length) return [];
-
-const k = 2 / (period + 1);
-const result = [values[0]];
-
-for (let i = 1; i < values.length; i++) {
-result.push(
-values[i] * k + result[i - 1] * (1 - k)
-);
-}
-
-return result;
-}
 
 function calculateRSI(values, period = 14) {
 if (values.length <= period) return 50;
@@ -298,47 +272,88 @@ if (avgGain === 0) return 0;
 return 100 - 100 / (1 + avgGain / avgLoss);
 }
 
-function calculateMACD(values) {
-const fast = emaSeries(values, 12);
-const slow = emaSeries(values, 26);
+function rsiDirection(rsi) {
+if (rsi >= 55) return 1;
+if (rsi <= 45) return -1;
+return 0;
+}
 
-const line = values.map((_, i) => fast[i] - slow[i]);
-const signal = emaSeries(line, 9);
+function rsiText(rsi) {
+if (rsi >= 70) return "قدرت خرید بالا؛ احتمال اشباع خرید";
+if (rsi >= 55) return "قدرت نسبی خریداران";
+if (rsi <= 30) return "قدرت فروش بالا؛ احتمال اشباع فروش";
+if (rsi <= 45) return "قدرت نسبی فروشندگان";
+return "تعادل نسبی خریداران و فروشندگان";
+}
 
-const last = line.length - 1;
+// ===============================
+// VOLUME
+// ===============================
 
+function analyzeVolume(candles) {
+if (candles.length < 31) {
 return {
-line: line[last],
-signal: signal[last],
-histogram: line[last] - signal[last],
-previousHistogram: line[last - 1] - signal[last - 1]
+available: false,
+ratio: null,
+direction: 0,
+upVolume: 0,
+downVolume: 0
 };
 }
 
-function calculateATR(candles, period = 14) {
-const trs = [];
+const recent = candles.slice(-10);
+const previous = candles.slice(-30, -10);
 
-for (let i = 1; i < candles.length; i++) {
-const c = candles[i];
-const previous = candles[i - 1].close;
+const average = arr =>
+arr.reduce((sum, c) => sum + c.volume, 0) / arr.length;
 
-trs.push(Math.max(
-c.high - c.low,
-Math.abs(c.high - previous),
-Math.abs(c.low - previous)
-));
+const recentVol = average(recent);
+const previousVol = average(previous);
+
+if (
+recentVol <= 0 ||
+previousVol <= 0 ||
+!Number.isFinite(recentVol) ||
+!Number.isFinite(previousVol)
+) {
+return {
+available: false,
+ratio: null,
+direction: 0,
+upVolume: 0,
+downVolume: 0
+};
 }
 
-if (trs.length < period) return 0;
+const upVolume = recent.reduce(
+(sum, c) => sum + (c.close > c.open ? c.volume : 0),
+0
+);
 
-let value =
-trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+const downVolume = recent.reduce(
+(sum, c) => sum + (c.close < c.open ? c.volume : 0),
+0
+);
 
-for (let i = period; i < trs.length; i++) {
-value = (value * (period - 1) + trs[i]) / period;
+const ratio = recentVol / previousVol;
+
+let direction = 0;
+
+if (ratio > 1.1 && upVolume > downVolume * 1.15) {
+direction = 1;
 }
 
-return value;
+if (ratio > 1.1 && downVolume > upVolume * 1.15) {
+direction = -1;
+}
+
+return {
+available: true,
+ratio,
+direction,
+upVolume,
+downVolume
+};
 }
 
 // ===============================
@@ -383,8 +398,9 @@ if (highs.length < 2 || lows.length < 2) {
 return {
 direction: 0,
 text: "ساختار نامشخص",
-lastHigh: null,
-lastLow: null
+lastHigh: highs.at(-1)?.price ?? null,
+lastLow: lows.at(-1)?.price ?? null,
+bos: 0
 };
 }
 
@@ -405,12 +421,15 @@ text = "سقف و کف پایین‌تر";
 }
 
 const last = candles.at(-1);
+let bos = 0;
 
 if (last.close > h1) {
 direction = 1;
+bos = 1;
 text = "شکست سقف اخیر";
 } else if (last.close < l1) {
 direction = -1;
+bos = -1;
 text = "شکست کف اخیر";
 }
 
@@ -418,7 +437,8 @@ return {
 direction,
 text,
 lastHigh: h1,
-lastLow: l1
+lastLow: l1,
+bos
 };
 }
 
@@ -430,51 +450,39 @@ function analyzeTrend(candles) {
 const closes = candles.map(c => c.close);
 const price = closes.at(-1);
 
-const ema20 = emaSeries(closes, 20).at(-1);
-const ema50 = emaSeries(closes, 50).at(-1);
-
 const rsi = calculateRSI(closes);
-const macd = calculateMACD(closes);
 const structure = analyzeStructure(candles);
+const volume = analyzeVolume(candles);
 
 let score = 0;
 const reasons = [];
 
-if (ema20 > ema50) {
-score++;
-reasons.push("EMA20 بالاتر از EMA50");
-} else if (ema20 < ema50) {
-score--;
-reasons.push("EMA20 پایین‌تر از EMA50");
-}
-
-if (price > ema20) {
-score++;
-reasons.push("قیمت بالای EMA20");
-} else if (price < ema20) {
-score--;
-reasons.push("قیمت زیر EMA20");
-}
-
+// ساختار بازار، عامل اصلی جهت
 if (structure.direction !== 0) {
-score += structure.direction * 2;
+score += structure.direction * 3;
 reasons.push(structure.text);
+} else {
+reasons.push("ساختار بازار جهت مشخصی ندارد");
 }
 
-if (rsi >= 55) {
-score++;
-reasons.push("RSI متمایل به صعود");
-} else if (rsi <= 45) {
-score--;
-reasons.push("RSI متمایل به نزول");
+// RSI فقط عامل کمکی
+const rsiSide = rsiDirection(rsi);
+
+if (rsiSide !== 0) {
+score += rsiSide;
+reasons.push(rsiText(rsi));
+} else {
+reasons.push("RSI در محدوده تعادل");
 }
 
-if (macd.histogram > 0) {
-score++;
-reasons.push("هیستوگرام MACD مثبت");
-} else if (macd.histogram < 0) {
-score--;
-reasons.push("هیستوگرام MACD منفی");
+// حجم فقط عامل تأییدی
+if (volume.available && volume.direction !== 0) {
+score += volume.direction;
+reasons.push(
+volume.direction === 1
+? "حجم معاملات به نفع خریداران"
+: "حجم معاملات به نفع فروشندگان"
+);
 }
 
 let direction = 0;
@@ -486,78 +494,10 @@ return {
 direction,
 score,
 price,
-ema20,
-ema50,
 rsi,
-macd,
 structure,
+volume,
 reasons
-};
-}
-
-// ===============================
-// VOLUME
-// ===============================
-
-function analyzeVolume(candles) {
-if (candles.length < 31) {
-return {
-available: false,
-ratio: null,
-direction: 0
-};
-}
-
-const recent = candles.slice(-10);
-const previous = candles.slice(-30, -10);
-
-const average = arr =>
-arr.reduce((sum, c) => sum + c.volume, 0) / arr.length;
-
-const recentVol = average(recent);
-const previousVol = average(previous);
-
-if (
-recentVol <= 0 ||
-previousVol <= 0 ||
-!Number.isFinite(recentVol) ||
-!Number.isFinite(previousVol)
-) {
-return {
-available: false,
-ratio: null,
-direction: 0
-};
-}
-
-const upVolume = recent.reduce(
-(sum, c) => sum + (c.close > c.open ? c.volume : 0),
-0
-);
-
-const downVolume = recent.reduce(
-(sum, c) => sum + (c.close < c.open ? c.volume : 0),
-0
-);
-
-const ratio = recentVol / previousVol;
-
-let direction = 0;
-
-if (ratio > 1.15 && upVolume > downVolume * 1.2) {
-direction = 1;
-}
-
-if (ratio > 1.15 && downVolume > upVolume * 1.2) {
-direction = -1;
-}
-
-return {
-available: true,
-ratio,
-direction,
-upVolume,
-downVolume
 };
 }
 
@@ -568,34 +508,19 @@ downVolume
 function analyzeOpportunity(candles, trendDirection) {
 const last = candles.at(-1);
 const previous = candles.at(-2);
-const previous2 = candles.at(-3);
 
 const closes = candles.map(c => c.close);
-const ema20Series = emaSeries(closes, 20);
-const ema20 = ema20Series.at(-1);
-
-const atr = calculateATR(candles);
+const rsi = calculateRSI(closes);
 const volume = analyzeVolume(candles);
 
-if (atr <= 0) {
-return {
-direction: 0,
-score: 0,
-reasons: ["ATR معتبر نیست"],
-atr,
-ema20,
-volume,
-counterTrend: false
-};
-}
-
+// سطوح مرجع، بدون احتساب کندل فعلی
 const reference = candles.slice(-21, -1);
 
 const priorHigh = Math.max(...reference.map(c => c.high));
 const priorLow = Math.min(...reference.map(c => c.low));
 
-// سطوح شکست بدون احتساب کندل فعلی و کندل قبلی
-const breakoutCandles = candles.slice(-12, -2);
+// سطوح شکست، بدون کندل فعلی و قبلی
+const breakoutCandles = candles.slice(-22, -2);
 
 const breakoutHigh = Math.max(
 ...breakoutCandles.map(c => c.high)
@@ -605,8 +530,18 @@ const breakoutLow = Math.min(
 ...breakoutCandles.map(c => c.low)
 );
 
-// 1. Liquidity Sweep
+// آخرین پیوت‌های تأییدشده
+const p = pivots(candles.slice(-80));
 
+const resistance = p.highs.length
+? p.highs.at(-1).price
+: priorHigh;
+
+const support = p.lows.length
+? p.lows.at(-1).price
+: priorLow;
+
+// 1. Liquidity Sweep
 const bullishSweep =
 last.low < priorLow &&
 last.close > priorLow &&
@@ -617,119 +552,66 @@ last.high > priorHigh &&
 last.close < priorHigh &&
 last.close < last.open;
 
-// 2. Break of Structure
+// 2. BOS
+const bullishBOS =
+last.close > breakoutHigh &&
+previous.close <= breakoutHigh;
 
-const bullishBOS = last.close > breakoutHigh;
-const bearishBOS = last.close < breakoutLow;
+const bearishBOS =
+last.close < breakoutLow &&
+previous.close >= breakoutLow;
 
-// 3. EMA Pullback
-
-const nearEMA =
-Math.abs(last.close - ema20) <= atr * 0.5;
-
-const bullishPullback =
-nearEMA &&
-last.low <= ema20 + atr * 0.2 &&
-last.close > last.open &&
-last.close > ema20 &&
-previous.close <= previous.open;
-
-const bearishPullback =
-nearEMA &&
-last.high >= ema20 - atr * 0.2 &&
-last.close < last.open &&
-last.close < ema20 &&
-previous.close >= previous.open;
-
-// 4. Breakout and Retest
-
+// 3. Breakout and Retest
 const bullishRetest =
 previous.close > breakoutHigh &&
-last.low <= breakoutHigh + atr * 0.2 &&
+last.low <= breakoutHigh &&
 last.close > breakoutHigh &&
 last.close > last.open;
 
 const bearishRetest =
 previous.close < breakoutLow &&
-last.high >= breakoutLow - atr * 0.2 &&
+last.high >= breakoutLow &&
 last.close < breakoutLow &&
 last.close < last.open;
 
-// 5. Consolidation Breakout
-
-const rangeCandles = candles.slice(-13, -3);
-
-const rangeHigh = Math.max(
-...rangeCandles.map(c => c.high)
-);
-
-const rangeLow = Math.min(
-...rangeCandles.map(c => c.low)
-);
-
-const rangeSize = rangeHigh - rangeLow;
-const compactRange = rangeSize <= atr * 2.5;
-
-const bullishConsolidationBreak =
-compactRange &&
-last.close > rangeHigh + atr * 0.05 &&
-last.close > last.open;
-
-const bearishConsolidationBreak =
-compactRange &&
-last.close < rangeLow - atr * 0.05 &&
-last.close < last.open;
-
-// 6. Momentum Candle
-
-const body = Math.abs(last.close - last.open);
+// 4. قدرت کندل؛ فقط بر اساس نسبت بدنه به دامنه خودش
 const candleRange = Math.max(
 last.high - last.low,
 0.00000001
 );
+
+const body = Math.abs(last.close - last.open);
+const bodyRatio = body / candleRange;
 
 const closePosition =
 (last.close - last.low) / candleRange;
 
 const bullishMomentum =
 last.close > last.open &&
-body >= atr * 0.55 &&
+bodyRatio >= 0.65 &&
 closePosition >= 0.75 &&
 last.close > previous.high;
 
 const bearishMomentum =
 last.close < last.open &&
-body >= atr * 0.55 &&
+bodyRatio >= 0.65 &&
 closePosition <= 0.25 &&
 last.close < previous.low;
 
-// 7. Trend Continuation
+// گروه شکست؛ BOS، پولبک و مومنتوم دوباره‌شماری نمی‌شوند
+const bullishBreakGroup =
+bullishRetest || bullishBOS || bullishMomentum;
 
-const bullishContinuation =
-trendDirection === 1 &&
-previous2.close < previous2.open &&
-previous.close <= previous2.close &&
-last.close > last.open &&
-last.close > previous.high &&
-last.close > ema20 &&
-Math.abs(last.close - ema20) <= atr * 1.2;
+const bearishBreakGroup =
+bearishRetest || bearishBOS || bearishMomentum;
 
-const bearishContinuation =
-trendDirection === -1 &&
-previous2.close > previous2.open &&
-previous.close >= previous2.close &&
-last.close < last.open &&
-last.close < previous.low &&
-last.close < ema20 &&
-Math.abs(last.close - ema20) <= atr * 1.2;
-
-// امتیازدهی گروهی برای جلوگیری از دوباره‌شماری یک حرکت
 let longSetupScore = 0;
 let shortSetupScore = 0;
 
 const longReasons = [];
 const shortReasons = [];
 
+// نقدینگی یک گروه مستقل است
 if (bullishSweep) {
 longSetupScore += 3;
 longReasons.push("جمع‌آوری نقدینگی زیر کف و بازگشت قیمت");
@@ -740,71 +622,32 @@ shortSetupScore += 3;
 shortReasons.push("جمع‌آوری نقدینگی بالای سقف و برگشت قیمت");
 }
 
-if (bullishRetest) {
-longSetupScore += 3;
-longReasons.push("شکست مقاومت و پولبک موفق");
-}
-
-if (bearishRetest) {
-shortSetupScore += 3;
-shortReasons.push("شکست حمایت و پولبک موفق");
-}
-
-if (bullishPullback) {
-longSetupScore += 2;
-longReasons.push("پولبک صعودی به EMA20");
-}
-
-if (bearishPullback) {
-shortSetupScore += 2;
-shortReasons.push("پولبک نزولی به EMA20");
-}
-
-// BOS، شکست تراکم و مومنتوم در یک گروه شمرده می‌شوند
-const bullishBreakGroup =
-bullishBOS ||
-bullishConsolidationBreak ||
-bullishMomentum;
-
-const bearishBreakGroup =
-bearishBOS ||
-bearishConsolidationBreak ||
-bearishMomentum;
-
+// شکست و پولبک یک گروه مستقل هستند
 if (bullishBreakGroup) {
-longSetupScore += 2;
+longSetupScore += bullishRetest ? 3 : 2;
 
-if (bullishBOS) {
+if (bullishRetest) {
+longReasons.push("شکست مقاومت و پولبک موفق");
+} else if (bullishBOS) {
 longReasons.push("شکست ساختار کوتاه‌مدت صعودی");
-} else if (bullishConsolidationBreak) {
-longReasons.push("خروج صعودی از محدوده تراکم");
 } else {
-longReasons.push("کندل مومنتوم صعودی");
+longReasons.push("کندل قدرتمند صعودی");
 }
 }
 
 if (bearishBreakGroup) {
-shortSetupScore += 2;
+shortSetupScore += bearishRetest ? 3 : 2;
 
-if (bearishBOS) {
+if (bearishRetest) {
+shortReasons.push("شکست حمایت و پولبک موفق");
+} else if (bearishBOS) {
 shortReasons.push("شکست ساختار کوتاه‌مدت نزولی");
-} else if (bearishConsolidationBreak) {
-shortReasons.push("خروج نزولی از محدوده تراکم");
 } else {
-shortReasons.push("کندل مومنتوم نزولی");
+shortReasons.push("کندل قدرتمند نزولی");
 }
 }
 
-if (bullishContinuation && !bullishBreakGroup) {
-longSetupScore += 2;
-longReasons.push("ادامه حرکت صعودی پس از اصلاح");
-}
-
-if (bearishContinuation && !bearishBreakGroup) {
-shortSetupScore += 2;
-shortReasons.push("ادامه حرکت نزولی پس از اصلاح");
-}
-
+// امتیازهای کمکی
 let longScore = longSetupScore;
 let shortScore = shortSetupScore;
 
@@ -818,13 +661,23 @@ shortScore++;
 shortReasons.push("هم‌جهت با روند ۱۵ دقیقه");
 }
 
+if (longSetupScore > 0 && rsi >= 55) {
+longScore++;
+longReasons.push("RSI تأییدکننده قدرت خریداران");
+}
+
+if (shortSetupScore > 0 && rsi <= 45) {
+shortScore++;
+shortReasons.push("RSI تأییدکننده قدرت فروشندگان");
+}
+
 if (
 longSetupScore > 0 &&
 volume.available &&
 volume.direction === 1
 ) {
 longScore++;
-longReasons.push("حجم متمایل به خرید");
+longReasons.push("حجم معاملات متمایل به خرید");
 }
 
 if (
@@ -833,7 +686,7 @@ volume.available &&
 volume.direction === -1
 ) {
 shortScore++;
-shortReasons.push("حجم متمایل به فروش");
+shortReasons.push("حجم معاملات متمایل به فروش");
 }
 
 let direction = 0;
@@ -841,24 +694,24 @@ let score = 0;
 let reasons = [];
 
 const minimumSetupScore = 2;
-const minimumScoreGap = 1;
 
 if (
 longSetupScore >= minimumSetupScore &&
-longScore >= shortScore + minimumScoreGap
+longScore > shortScore
 ) {
 direction = 1;
 score = longScore;
 reasons = [...longReasons];
 } else if (
 shortSetupScore >= minimumSetupScore &&
-shortScore >= longScore + minimumScoreGap
+shortScore > longScore
 ) {
 direction = -1;
 score = shortScore;
 reasons = [...shortReasons];
 }
 
+// کنترل معامله خلاف روند
 const counterTrend =
 direction !== 0 &&
 trendDirection !== 0 &&
@@ -868,14 +721,14 @@ if (counterTrend) {
 const hasSweep =
 direction === 1 ? bullishSweep : bearishSweep;
 
+const hasRetest =
+direction === 1 ? bullishRetest : bearishRetest;
+
 const hasBOS =
 direction === 1 ? bullishBOS : bearishBOS;
 
 const hasMomentum =
 direction === 1 ? bullishMomentum : bearishMomentum;
-
-const hasRetest =
-direction === 1 ? bullishRetest : bearishRetest;
 
 const strongCounterSetup =
 hasSweep ||
@@ -897,93 +750,50 @@ if (direction === 0 && reasons.length === 0) {
 reasons = ["هنوز الگوی معاملاتی کافی شناسایی نشده است"];
 }
 
-// قیمت شکست برای ورود بعد از بسته‌شدن کندل ۵ دقیقه
-const entryTrigger = direction === 1
-? last.high
-: direction === -1
-? last.low
+// قیمت ورود بر اساس بسته‌شدن کندل سیگنال
+const entryPrice = direction !== 0
+? last.close
 : null;
-
-// نزدیک‌ترین کف و سقف اخیر برای حد ضرر
-const swingCandles = candles.slice(-9, -1);
-
-const swingLow = Math.min(
-...swingCandles.map(c => c.low)
-);
-
-const swingHigh = Math.max(
-...swingCandles.map(c => c.high)
-);
 
 return {
 direction,
 score,
 reasons,
-atr,
-ema20,
+rsi,
+volume,
+
 priorHigh,
 priorLow,
 breakoutHigh,
 breakoutLow,
-rangeHigh,
-rangeLow,
+
+support,
+resistance,
+
 bullishSweep,
 bearishSweep,
 bullishBOS,
 bearishBOS,
-bullishPullback,
-bearishPullback,
 bullishRetest,
 bearishRetest,
-bullishConsolidationBreak,
-bearishConsolidationBreak,
 bullishMomentum,
 bearishMomentum,
-bullishContinuation,
-bearishContinuation,
+
 longSetupScore,
 shortSetupScore,
 counterTrend,
-volume,
-entryTrigger,
-swingLow,
-swingHigh,
+
+entryPrice,
+signalClose: last.close,
 signalTime: last.time,
-signalClose: last.close
-};
-}
 
-// ===============================
-// OPTIONAL 1 MINUTE ASSIST
-// ===============================
-
-function analyzeMicro(candles, direction) {
-if (!candles || candles.length < 30) {
-return {
-available: false,
-aligned: false,
-text: "داده یک‌دقیقه در دسترس نیست"
-};
-}
-
-const closes = candles.map(c => c.close);
-const ema9 = emaSeries(closes, 9).at(-1);
-const last = candles.at(-1);
-
-const aligned = direction === 1
-? last.close > ema9 && last.close > last.open
-: direction === -1
-? last.close < ema9 && last.close < last.open
-: false;
-
-return {
-available: true,
-aligned,
-ema9,
-price: last.close,
-text: aligned
-? "رفتار یک‌دقیقه با جهت فرصت هم‌راستاست"
-: "تأیید یک‌دقیقه‌ای هم‌راستا نیست"
+// برای مدیریت ریسک
+swingLow: Math.min(
+...candles.slice(-9, -1).map(c => c.low)
+),
+swingHigh: Math.max(
+...candles.slice(-9, -1).map(c => c.high)
+)
 };
 }
 
@@ -996,78 +806,132 @@ let bullish = 0;
 let bearish = 0;
 let neutral = 0;
 
-// EMA: وزن 2
-if (trend.ema20 > trend.ema50) bullish += 2;
-else if (trend.ema20 < trend.ema50) bearish += 2;
-else neutral += 2;
+// ساختار بازار ۱۵ دقیقه: وزن 3
+if (trend.structure.direction === 1) bullish += 3;
+else if (trend.structure.direction === -1) bearish += 3;
+else neutral += 3;
 
-// قیمت نسبت به EMA20: وزن 1
-if (trend.price > trend.ema20) bullish++;
-else if (trend.price < trend.ema20) bearish++;
-else neutral++;
-
-// ساختار بازار: وزن 2
-if (trend.structure.direction === 1) bullish += 2;
-else if (trend.structure.direction === -1) bearish += 2;
-else neutral += 2;
-
-// RSI: وزن 1
+// RSI پانزده دقیقه: وزن 1
 if (trend.rsi >= 55) bullish++;
 else if (trend.rsi <= 45) bearish++;
 else neutral++;
 
-// MACD: وزن 1
-if (trend.macd.histogram > 0) bullish++;
-else if (trend.macd.histogram < 0) bearish++;
+// حجم پانزده دقیقه: وزن 1
+if (trend.volume.available && trend.volume.direction === 1) {
+bullish++;
+} else if (
+trend.volume.available &&
+trend.volume.direction === -1
+) {
+bearish++;
+} else {
+neutral++;
+}
+
+// ساختار فرصت پنج دقیقه: حداکثر 3
+if (opportunity.longSetupScore > opportunity.shortSetupScore) {
+bullish += Math.min(3, opportunity.longSetupScore);
+} else if (
+opportunity.shortSetupScore > opportunity.longSetupScore
+) {
+bearish += Math.min(3, opportunity.shortSetupScore);
+} else {
+neutral += 3;
+}
+
+// RSI پنج دقیقه: وزن 1
+if (opportunity.rsi >= 55) bullish++;
+else if (opportunity.rsi <= 45) bearish++;
 else neutral++;
 
-// فرصت 5 دقیقه: وزن حداکثر 4
-const longSetup = Math.min(4, opportunity.longSetupScore || 0);
-const shortSetup = Math.min(4, opportunity.shortSetupScore || 0);
-
-if (longSetup > shortSetup) {
-bullish += longSetup;
-neutral += Math.max(0, 4 - longSetup);
-} else if (shortSetup > longSetup) {
-bearish += shortSetup;
-neutral += Math.max(0, 4 - shortSetup);
+// حجم پنج دقیقه: وزن 1
+if (
+opportunity.volume.available &&
+opportunity.volume.direction === 1
+) {
+bullish++;
+} else if (
+opportunity.volume.available &&
+opportunity.volume.direction === -1
+) {
+bearish++;
 } else {
-neutral += 4;
+neutral++;
 }
 
 const total = bullish + bearish + neutral || 1;
 
-const bullPercent = bullish / total * 100;
-const bearPercent = bearish / total * 100;
-const neutralPercent = neutral / total * 100;
-
 return {
-bullish: bullPercent,
-bearish: bearPercent,
-neutral: neutralPercent
+bullish: bullish / total * 100,
+bearish: bearish / total * 100,
+neutral: neutral / total * 100
 };
+}
+
+// ===============================
+// ATR - ONLY FOR SL AND TP
+// ===============================
+
+function calculateATR(candles, period = 14) {
+const trs = [];
+
+for (let i = 1; i < candles.length; i++) {
+const c = candles[i];
+const previous = candles[i - 1].close;
+
+trs.push(Math.max(
+c.high - c.low,
+Math.abs(c.high - previous),
+Math.abs(c.low - previous)
+));
+}
+
+if (trs.length < period) return 0;
+
+let value =
+trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+
+for (let i = period; i < trs.length; i++) {
+value = (value * (period - 1) + trs[i]) / period;
+}
+
+return value;
 }
 
 // ===============================
 // TRADE PLAN
 // ===============================
 
-function buildTradePlan(direction, entry, opportunity) {
+function buildTradePlan(direction, entry, opportunity, candles) {
 if (!direction || !Number.isFinite(entry)) return null;
 
+// ATR فقط از این قسمت به بعد استفاده می‌شود.
+const atr = calculateATR(candles);
+
+if (!Number.isFinite(atr) || atr <= 0) return null;
+
 const isLong = direction === 1;
-const atr = opportunity.atr;
 
 let stop;
 
 if (isLong) {
+const structuralStop =
+opportunity.swingLow < entry
+? opportunity.swingLow - atr * 0.2
+: entry - atr * 1.2;
+
 stop = Math.min(
-opportunity.swingLow - atr * 0.1,
+structuralStop,
 entry - atr * 0.8
 );
 } else {
+const structuralStop =
+opportunity.swingHigh > entry
+? opportunity.swingHigh + atr * 0.2
+: entry + atr * 1.2;
+
 stop = Math.max(
-opportunity.swingHigh + atr * 0.1,
+structuralStop,
 entry + atr * 0.8
 );
 }
@@ -1094,6 +958,7 @@ return {
 entry,
 stop,
 risk,
+atr,
 targets,
 multipliers,
 counterTrend: opportunity.counterTrend
@@ -1104,7 +969,7 @@ counterTrend: opportunity.counterTrend
 // COMPLETE ANALYSIS
 // ===============================
 
-function analyzeAll(trendCandles, opportunityCandles, microCandles) {
+function analyzeAll(trendCandles, opportunityCandles) {
 const trend = analyzeTrend(trendCandles);
 
 const opportunity = analyzeOpportunity(
@@ -1112,49 +977,24 @@ opportunityCandles,
 trend.direction
 );
 
-const micro = analyzeMicro(
-microCandles,
-opportunity.direction
-);
-
 const percentages = calculatePercentages(
 trend,
 opportunity
 );
 
-// اگر الگوی شکست با کلوز کندل 5 دقیقه تأیید شده باشد،
-// ورود می‌تواند در قیمت بسته‌شدن همان کندل بررسی شود.
-const confirmedBreak =
-opportunity.direction === 1
-? (
-opportunity.bullishBOS ||
-opportunity.bullishConsolidationBreak ||
-opportunity.bullishRetest
-)
-: opportunity.direction === -1
-? (
-opportunity.bearishBOS ||
-opportunity.bearishConsolidationBreak ||
-opportunity.bearishRetest
-)
-: false;
-
-const entryPrice = confirmedBreak
-? opportunity.signalClose
-: opportunity.entryTrigger;
-
 const tradePlan = opportunity.direction !== 0
 ? buildTradePlan(
 opportunity.direction,
-entryPrice,
-opportunity
+opportunity.entryPrice,
+opportunity,
+opportunityCandles
 )
 : null;
 
 let entryStatus = "none";
 
 if (opportunity.direction !== 0 && tradePlan) {
-entryStatus = confirmedBreak ? "confirmed" : "waiting";
+entryStatus = "ready";
 }
 
 if (opportunity.direction !== 0 && !tradePlan) {
@@ -1164,11 +1004,9 @@ entryStatus = "invalid";
 return {
 trend,
 opportunity,
-micro,
 percentages,
 tradePlan,
-entryStatus,
-entryConfirmed: entryStatus === "confirmed"
+entryStatus
 };
 }
 
@@ -1189,14 +1027,10 @@ return "بدون جهت";
 }
 
 function trendStatus(a) {
-if (a.entryStatus === "confirmed") {
+if (a.entryStatus === "ready") {
 return a.opportunity.direction === 1
-? "🟢 شرط ورود BUY با کلوز ۵ دقیقه تأیید شده"
-: "🔴 شرط ورود SELL با کلوز ۵ دقیقه تأیید شده";
-}
-
-if (a.entryStatus === "waiting") {
-return "⏳ منتظر رسیدن قیمت و تأیید کندل ۵ دقیقه";
+? "🟢 فرصت BUY شناسایی شده؛ بررسی ورود پس از بسته‌شدن کندل سیگنال"
+: "🔴 فرصت SELL شناسایی شده؛ بررسی ورود پس از بسته‌شدن کندل سیگنال";
 }
 
 if (a.entryStatus === "invalid") {
@@ -1225,11 +1059,8 @@ if (!a.tradePlan) return "";
 const p = a.tradePlan;
 const direction = a.opportunity.direction;
 
-const entryCondition = a.entryStatus === "confirmed"
-? "کندل ۵ دقیقه‌ای شرط شکست را تأیید کرده است."
-: direction === 1
-? `ورود BUY فقط پس از کلوز کندل ۵ دقیقه بالای ${format(p.entry)}`
-: `ورود SELL فقط پس از کلوز کندل ۵ دقیقه پایین ${format(p.entry)}`;
+const entryCondition =
+"مبنای قیمت ورود، بسته‌شدن آخرین کندل سیگنال ۵ دقیقه است. پیش از ورود، اعتبار سطح و قیمت جاری را بررسی کن.";
 
 const counterWarning = p.counterTrend
 ? "\n⚠️ این معامله خلاف روند ۱۵ دقیقه است."
@@ -1238,7 +1069,7 @@ const counterWarning = p.counterTrend
 return `📍 برنامه معامله
 
 جهت: ${sideText(direction)}
-قیمت ورود: ${format(p.entry)}
+قیمت مرجع ورود: ${format(p.entry)}
 شرط ورود: ${entryCondition}
 
 حد ضرر: ${format(p.stop)}
@@ -1249,6 +1080,8 @@ return `📍 برنامه معامله
 🟢 TP4: ${format(p.targets[3])} | 2.5R
 🟢 TP5: ${format(p.targets[4])} | 3R
 
+فاصله ریسک: ${format(p.risk)}
+ATR14 برای مدیریت معامله: ${format(p.atr)}
 ${counterWarning}
 
 ⏱ اعتبار اولیه سیگنال: حداکثر ۳ کندل ۵ دقیقه‌ای از زمان کندل سیگنال.
@@ -1285,37 +1118,47 @@ ${percentageReport(p)}
 
 ━━━━━━━━━━━━━━
 1️⃣ جهت بازار | ۱۵ دقیقه
+
 ${directionText(trend.direction)}
 ساختار: ${trend.structure.text}
-EMA20: ${format(trend.ema20)}
-EMA50: ${format(trend.ema50)}
-RSI: ${format(trend.rsi)}
+RSI14: ${format(trend.rsi)}
+وضعیت RSI: ${rsiText(trend.rsi)}
 
 ━━━━━━━━━━━━━━
 2️⃣ فرصت معاملاتی | ۵ دقیقه
+
 ${opportunityText}
+
+RSI14: ${format(opportunity.rsi)}
 
 ${reasons}
 
 ━━━━━━━━━━━━━━
-3️⃣ زمان‌بندی ورود
-${trendStatus(a)}
+3️⃣ سطوح مهم قیمت
 
-${a.tradePlan
-? `قیمت پیشنهادی ورود: ${format(a.tradePlan.entry)}`
-: "فعلاً قیمت ورود معتبری تعیین نشده است."}
+مقاومت: ${format(opportunity.resistance)}
+حمایت: ${format(opportunity.support)}
+سطح شکست سقف: ${format(opportunity.breakoutHigh)}
+سطح شکست کف: ${format(opportunity.breakoutLow)}
 
 ━━━━━━━━━━━━━━
-4️⃣ بررسی کمکی | ۱ دقیقه
-${a.micro.text}
+4️⃣ نتیجه نهایی
+
+${trendStatus(a)}
 
 ${a.tradePlan
 ? tradePlanText(a)
 : "⛔ در حال حاضر برنامه معامله صادر نشده است."}
 
 ━━━━━━━━━━━━━━
-⚠️ ربات معامله را اجرا نمی‌کند و استاپ یا تارگت را زنده پایش نمی‌کند.
-⚠️ درصدها سهم شواهد تحلیلی هستند، نه احتمال سود.`;
+• روند اصلی از ۱۵ دقیقه استخراج می‌شود.
+• فرصت و قیمت ورود از ۵ دقیقه تعیین می‌شود.
+• RSI عامل کمکی تحلیل است، نه سیگنال مستقل.
+• ATR فقط برای حد ضرر و تارگت‌ها استفاده می‌شود.
+• درصدها سهم شواهد تحلیلی هستند، نه احتمال سود.
+• تحلیل خودکار و پایش زنده معامله فعال نیست.
+
+⚠️ این تحلیل تضمین‌کننده سود نیست.`;
 }
 
 // ===============================
@@ -1325,7 +1168,6 @@ ${a.tradePlan
 function detailReport(name, a) {
 const t = a.trend;
 const o = a.opportunity;
-const c = a.micro;
 const p = a.percentages;
 
 const trendReasons = t.reasons.length
@@ -1336,9 +1178,32 @@ const opportunityReasons = o.reasons.length
 ? o.reasons.map(x => `• ${x}`).join("\n")
 : "موقعیت معاملاتی مشخصی شناسایی نشد";
 
-const volumeText = o.volume?.available
-? `نسبت حجم ۱۰ کندل اخیر به ۲۰ کندل قبل: ${format(o.volume.ratio)} برابر`
-: "حجم معتبر در دسترس نیست";
+const volumeText = volume => {
+if (!volume?.available) {
+return "حجم معتبر در دسترس نیست";
+}
+
+return `نسبت حجم ۱۰ کندل اخیر به ۲۰ کندل قبل: ${format(volume.ratio)} برابر
+جهت حجم: ${directionText(volume.direction)}`;
+};
+
+const sweepText = o.bullishSweep
+? "جمع‌آوری نقدینگی زیر کف شناسایی شد"
+: o.bearishSweep
+? "جمع‌آوری نقدینگی بالای سقف شناسایی شد"
+: "جمع‌آوری نقدینگی مشخصی شناسایی نشد";
+
+const bosText = o.bullishBOS
+? "شکست ساختار صعودی"
+: o.bearishBOS
+? "شکست ساختار نزولی"
+: "شکست ساختار تأیید نشده";
+
+const retestText = o.bullishRetest
+? "پولبک صعودی موفق"
+: o.bearishRetest
+? "پولبک نزولی موفق"
+: "پولبک معتبر شناسایی نشد";
 
 return `🔬 جزئیات تحلیل ${name}
 
@@ -1362,18 +1227,20 @@ ${percentBar(p.neutral)}
 جهت: ${directionText(t.direction)}
 امتیاز جهت: ${t.score}
 
-EMA20: ${format(t.ema20)}
-EMA50: ${format(t.ema50)}
 RSI14: ${format(t.rsi)}
-MACD: ${format(t.macd.line)}
-MACD Signal: ${format(t.macd.signal)}
-MACD Histogram: ${format(t.macd.histogram)}
+وضعیت RSI: ${rsiText(t.rsi)}
 
 ساختار بازار:
 ${t.structure.text}
 
+آخرین سقف ساختاری: ${format(t.structure.lastHigh)}
+آخرین کف ساختاری: ${format(t.structure.lastLow)}
+
 دلایل:
 ${trendReasons}
+
+حجم:
+${volumeText(t.volume)}
 
 ━━━━━━━━━━━━━━
 2️⃣ تحلیل فرصت | ۵ دقیقه
@@ -1381,29 +1248,34 @@ ${trendReasons}
 جهت فرصت: ${sideText(o.direction)}
 امتیاز فرصت: ${o.score}
 
+RSI14: ${format(o.rsi)}
+وضعیت RSI: ${rsiText(o.rsi)}
+
 ${opportunityReasons}
 
 امتیاز الگوی صعودی: ${format(o.longSetupScore)}
 امتیاز الگوی نزولی: ${format(o.shortSetupScore)}
 
+━━━━━━━━━━━━━━
+3️⃣ بررسی ساختار و نقدینگی
+
+${sweepText}
+${bosText}
+${retestText}
+
 سطح مرجع سقف: ${format(o.priorHigh)}
 سطح مرجع کف: ${format(o.priorLow)}
+
 سطح شکست سقف: ${format(o.breakoutHigh)}
 سطح شکست کف: ${format(o.breakoutLow)}
 
-EMA20: ${format(o.ema20)}
-ATR14: ${format(o.atr)}
-
-${volumeText}
+حمایت: ${format(o.support)}
+مقاومت: ${format(o.resistance)}
 
 ━━━━━━━━━━━━━━
-3️⃣ بررسی کمکی | ۱ دقیقه
+4️⃣ بررسی حجم معاملات | ۵ دقیقه
 
-${c.text}
-قیمت: ${format(c.price)}
-EMA9: ${format(c.ema9)}
-
-این تایم‌فریم شرط اجباری ورود نیست.
+${volumeText(o.volume)}
 
 ━━━━━━━━━━━━━━
 📍 نتیجه نهایی
@@ -1418,8 +1290,9 @@ ${a.tradePlan
 نکات:
 • روند اصلی از ۱۵ دقیقه استخراج می‌شود.
 • فرصت و قیمت ورود از ۵ دقیقه تعیین می‌شود.
-• یک‌دقیقه فقط ابزار کمکی است.
-• حجم عامل کمکی است و شرط اجباری ورود نیست.
+• RSI فقط عامل کمکی تحلیل است.
+• ATR فقط برای محاسبه حد ضرر و تارگت‌هاست.
+• EMA، MACD و CHoCH در تحلیل استفاده نمی‌شوند.
 • درصدها سهم وزنی شواهد تحلیلی هستند.
 • CVD واقعی در این نسخه پیاده‌سازی نشده است.
 • Order Book هنوز در محاسبه سیگنال استفاده نمی‌شود.
@@ -1447,21 +1320,7 @@ getCandles(symbol, "15"),
 getCandles(symbol, "5")
 ]);
 
-// یک‌دقیقه فقط ابزار کمکی است؛ نبودنش تحلیل را متوقف نمی‌کند.
-let candles1 = [];
-
-try {
-candles1 = await getCandles(symbol, "1");
-} catch (microError) {
-console.warn("1m data unavailable:", microError.message);
-}
-
-const result = analyzeAll(
-candles15,
-candles5,
-candles1
-);
-
+const result = analyzeAll(candles15, candles5);
 const name = ASSET_NAMES[asset];
 
 const report = detail
@@ -1506,8 +1365,12 @@ chatId,
 `سلام! من Traid هستم 🤖
 
 ۱۵ دقیقه: تشخیص روند اصلی
-۵ دقیقه: پیدا کردن فرصت و قیمت ورود
-۱ دقیقه: ابزار کمکی برای بررسی دقیق‌تر ورود
+۵ دقیقه: شناسایی فرصت و قیمت ورود
+
+ابزارهای تحلیل:
+ساختار بازار، BOS، نقدینگی، حجم و RSI
+
+ATR فقط برای حد ضرر و تارگت‌ها استفاده می‌شود.
 
 ارز موردنظرت را انتخاب کن:`,
 env,
@@ -1630,8 +1493,6 @@ update = await request.json();
 return response("Bad request", 400);
 }
 
-// پاسخ فوری به تلگرام؛ پردازش در پس‌زمینه
-// تا به دلیل طولانی‌شدن تحلیل، وب‌هوک دوباره ارسال نشود.
 const task = (async () => {
 if (update.message) {
 try {
