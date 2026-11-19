@@ -36,6 +36,9 @@ return Response.json({
 ok: true,
 message: "Simple Telegram Bot is running"
 });
+}
+
+// تست اعتبار توکن تلگرام
 if (request.method === "GET" && url.pathname === "/check-token") {
 try {
 const response = await fetch(
