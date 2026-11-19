@@ -528,16 +528,22 @@ downVolume
 }
 
 // ===============================
-// STAGE 2: 5 MINUTE OPPORTUNITY
+// STAGE 2: BALANCED 5 MIN OPPORTUNITY
 // ===============================
 
 function analyzeOpportunity(candles, trendDirection) {
 const last = candles.at(-1);
 const previous = candles.at(-2);
+const previous2 = candles.at(-3);
 
 const closes = candles.map(c => c.close);
-const ema20 = emaSeries(closes, 20).at(-1);
+const ema20Series = emaSeries(closes, 20);
+const ema20 = ema20Series.at(-1);
+const previousEMA = ema20Series.at(-2);
+
 const atr = calculateATR(candles);
+
+const volume = analyzeVolume(candles);
 
 if (atr <= 0) {
 return {
@@ -546,7 +552,8 @@ score: 0,
 reasons: ["ATR معتبر نیست"],
 atr,
 ema20,
-volume: { available: false, ratio: null, direction: 0 }
+volume,
+counterTrend: false
 };
 }
 
@@ -559,8 +566,7 @@ const breakoutCandles = candles.slice(-11, -1);
 const breakoutHigh = Math.max(...breakoutCandles.map(c => c.high));
 const breakoutLow = Math.min(...breakoutCandles.map(c => c.low));
 
-const volume = analyzeVolume(candles);
-
+// 1. Liquidity sweep
 const bullishSweep =
 last.low < priorLow &&
 last.close > priorLow &&
@@ -571,22 +577,97 @@ last.high > priorHigh &&
 last.close < priorHigh &&
 last.close < last.open;
 
+// 2. Short-term structure break
 const bullishBOS = last.close > breakoutHigh;
 const bearishBOS = last.close < breakoutLow;
 
-const nearEMA = Math.abs(last.close - ema20) <= atr * 0.35;
+// 3. EMA pullback
+const nearEMA = Math.abs(last.close - ema20) <= atr * 0.5;
 
 const bullishPullback =
 nearEMA &&
+last.low <= ema20 + atr * 0.2 &&
 last.close > last.open &&
 last.close > ema20 &&
 previous.close <= previous.open;
 
 const bearishPullback =
 nearEMA &&
+last.high >= ema20 - atr * 0.2 &&
 last.close < last.open &&
 last.close < ema20 &&
 previous.close >= previous.open;
+
+// 4. Breakout and retest
+const bullishRetest =
+previous.close > breakoutHigh &&
+last.low <= breakoutHigh + atr * 0.2 &&
+last.close > breakoutHigh &&
+last.close > last.open;
+
+const bearishRetest =
+previous.close < breakoutLow &&
+last.high >= breakoutLow - atr * 0.2 &&
+last.close < breakoutLow &&
+last.close < last.open;
+
+// 5. Consolidation breakout
+const rangeCandles = candles.slice(-13, -3);
+
+const rangeHigh = Math.max(...rangeCandles.map(c => c.high));
+const rangeLow = Math.min(...rangeCandles.map(c => c.low));
+const rangeSize = rangeHigh - rangeLow;
+
+const compactRange = rangeSize <= atr * 2.5;
+
+const bullishConsolidationBreak =
+compactRange &&
+last.close > rangeHigh + atr * 0.05 &&
+last.close > last.open;
+
+const bearishConsolidationBreak =
+compactRange &&
+last.close < rangeLow - atr * 0.05 &&
+last.close < last.open;
+
+// 6. Momentum candle
+const body = Math.abs(last.close - last.open);
+const candleRange = Math.max(last.high - last.low, 0.00000001);
+const closePosition = (last.close - last.low) / candleRange;
+
+const bullishMomentum =
+last.close > last.open &&
+body >= atr * 0.65 &&
+closePosition >= 0.75 &&
+last.close > previous.high;
+
+const bearishMomentum =
+last.close < last.open &&
+body >= atr * 0.65 &&
+closePosition <= 0.25 &&
+last.close < previous.low;
+
+// 7. Trend continuation after a short pullback
+const bullishContinuation =
+trendDirection === 1 &&
+previous2.close < previous2.open &&
+previous.close <= previous2.close &&
+last.close > last.open &&
+last.close > previous.high &&
+last.close > ema20 &&
+Math.abs(last.close - ema20) <= atr * 1.2;
+
+const bearishContinuation =
+trendDirection === -1 &&
+previous2.close > previous2.open &&
+previous.close >= previous2.close &&
+last.close < last.open &&
+last.close < previous.low &&
+last.close < ema20 &&
+Math.abs(last.close - ema20) <= atr * 1.2;
+
+let longSetupScore = 0;
+let shortSetupScore = 0;
 
 let longScore = 0;
 let shortScore = 0;
@@ -594,52 +675,97 @@ let shortScore = 0;
 const longReasons = [];
 const shortReasons = [];
 
+// Setup signals: each pattern contributes to the setup score.
 if (bullishSweep) {
-longScore += 2;
+longSetupScore += 2;
 longReasons.push("شکار نقدینگی زیر کف و بازگشت قیمت");
 }
 
 if (bearishSweep) {
-shortScore += 2;
+shortSetupScore += 2;
 shortReasons.push("شکار نقدینگی بالای سقف و برگشت قیمت");
 }
 
 if (bullishBOS) {
-longScore += 2;
+longSetupScore += 2;
 longReasons.push("شکست ساختار کوتاه‌مدت صعودی");
 }
 
 if (bearishBOS) {
-shortScore += 2;
+shortSetupScore += 2;
 shortReasons.push("شکست ساختار کوتاه‌مدت نزولی");
 }
 
 if (bullishPullback) {
-longScore++;
+longSetupScore += 1;
 longReasons.push("پولبک صعودی به EMA20");
 }
 
 if (bearishPullback) {
-shortScore++;
+shortSetupScore += 1;
 shortReasons.push("پولبک نزولی به EMA20");
 }
 
-if (trendDirection === 1) {
+if (bullishRetest) {
+longSetupScore += 2;
+longReasons.push("شکست مقاومت و پولبک موفق به آن");
+}
+
+if (bearishRetest) {
+shortSetupScore += 2;
+shortReasons.push("شکست حمایت و پولبک موفق به آن");
+}
+
+if (bullishConsolidationBreak) {
+longSetupScore += 2;
+longReasons.push("خروج صعودی از محدوده تراکم");
+}
+
+if (bearishConsolidationBreak) {
+shortSetupScore += 2;
+shortReasons.push("خروج نزولی از محدوده تراکم");
+}
+
+if (bullishMomentum) {
+longSetupScore += 2;
+longReasons.push("کندل مومنتوم صعودی قدرتمند");
+}
+
+if (bearishMomentum) {
+shortSetupScore += 2;
+shortReasons.push("کندل مومنتوم نزولی قدرتمند");
+}
+
+if (bullishContinuation) {
+longSetupScore += 1;
+longReasons.push("ادامه حرکت صعودی پس از اصلاح کوتاه");
+}
+
+if (bearishContinuation) {
+shortSetupScore += 1;
+shortReasons.push("ادامه حرکت نزولی پس از اصلاح کوتاه");
+}
+
+// Trend and volume are supporting evidence, not standalone setups.
+longScore = longSetupScore;
+shortScore = shortSetupScore;
+
+if (longSetupScore > 0 && trendDirection === 1) {
 longScore++;
 longReasons.push("هم‌جهت با روند ۱۵ دقیقه");
 }
 
-if (trendDirection === -1) {
+if (shortSetupScore > 0 && trendDirection === -1) {
 shortScore++;
 shortReasons.push("هم‌جهت با روند ۱۵ دقیقه");
 }
 
-if (volume.available && volume.direction === 1) {
+if (longSetupScore > 0 && volume.available && volume.direction === 1) {
 longScore++;
 longReasons.push("حجم متمایل به خرید");
 }
 
-if (volume.available && volume.direction === -1) {
+if (shortSetupScore > 0 && volume.available && volume.direction === -1) {
 shortScore++;
 shortReasons.push("حجم متمایل به فروش");
 }
@@ -648,11 +774,21 @@ let direction = 0;
 let score = 0;
 let reasons = [];
 
-if (longScore >= 2 && longScore > shortScore) {
+// A real setup is mandatory. Trend and volume alone cannot create a signal.
+const minimumSetupScore = 2;
+const minimumScoreGap = 1;
+
+if (
+longSetupScore >= minimumSetupScore &&
+longScore >= shortScore + minimumScoreGap
+) {
 direction = 1;
 score = longScore;
 reasons = longReasons;
-} else if (shortScore >= 2 && shortScore > longScore) {
+} else if (
+shortSetupScore >= minimumSetupScore &&
+shortScore >= longScore + minimumScoreGap
+) {
 direction = -1;
 score = shortScore;
 reasons = shortReasons;
@@ -663,16 +799,31 @@ direction !== 0 &&
 trendDirection !== 0 &&
 direction !== trendDirection;
 
+// Countertrend setups need stronger evidence.
 if (counterTrend) {
 const hasSweep = direction === 1 ? bullishSweep : bearishSweep;
+const hasBOS = direction === 1 ? bullishBOS : bearishBOS;
+const hasMomentum = direction === 1 ? bullishMomentum : bearishMomentum;
+const hasRetest = direction === 1 ? bullishRetest : bearishRetest;
 
-if (!hasSweep) {
+const strongCounterSetup =
+hasSweep ||
+(hasBOS && hasMomentum) ||
+(hasRetest && hasMomentum);
+
+if (!strongCounterSetup) {
 direction = 0;
 score = 0;
-reasons = ["فرصت خلاف روند بدون شکار نقدینگی معتبر رد شد"];
+reasons = [
+"فرصت خلاف روند قدرت کافی ندارد و رد شد"
+];
 } else {
-reasons.push("معامله خلاف روند؛ نیازمند تأیید قوی‌تر");
+reasons.push("معامله خلاف روند؛ شواهد قوی‌تر شناسایی شد");
 }
+}
+
+if (direction === 0 && reasons.length === 0) {
+reasons = ["هنوز الگوی معاملاتی کافی شناسایی نشده است"];
 }
 
 return {
@@ -685,12 +836,24 @@ priorHigh,
 priorLow,
 breakoutHigh,
 breakoutLow,
+rangeHigh,
+rangeLow,
 bullishSweep,
 bearishSweep,
 bullishBOS,
 bearishBOS,
 bullishPullback,
 bearishPullback,
+bullishRetest,
+bearishRetest,
+bullishConsolidationBreak,
+bearishConsolidationBreak,
+bullishMomentum,
+bearishMomentum,
+bullishContinuation,
+bearishContinuation,
+longSetupScore,
+shortSetupScore,
 counterTrend,
 volume
 };
@@ -864,7 +1027,6 @@ confirmation
 )
 : null;
 
-// اگر حد ضرر معتبر نباشد، ورود تأییدشده محسوب نمی‌شود.
 if (confirmation.confirmed && !tradePlan) {
 confirmation.confirmed = false;
 confirmation.reason =
@@ -1030,6 +1192,9 @@ ${trendReasons}
 
 ${opportunityReasons}
 
+امتیاز الگوی صعودی: ${format(o.longSetupScore)}
+امتیاز الگوی نزولی: ${format(o.shortSetupScore)}
+
 سطح مرجع سقف: ${format(o.priorHigh)}
 سطح مرجع کف: ${format(o.priorLow)}
 EMA20: ${format(o.ema20)}
@@ -1061,9 +1226,9 @@ ${a.entryConfirmed
 
 نکات:
 • جهت ۱۵ دقیقه، جهت غالب را مشخص می‌کند.
-• فرصت ۵ دقیقه می‌تواند در شرایط خاص خلاف روند باشد.
+• فرصت ۵ دقیقه با چند الگوی مختلف بررسی می‌شود.
 • ورود ۱ دقیقه با شکست و کندل تأییدی بررسی می‌شود.
-• حجم فقط عامل کمکی است و شرط اجباری ورود نیست.
+• حجم عامل کمکی است و شرط اجباری ورود نیست.
 • CVD واقعی در این نسخه پیاده‌سازی نشده است.
 • SMC در این نسخه شامل بررسی ساده شکار نقدینگی است.
 
@@ -1295,4 +1460,3 @@ console.error("Callback error:", error);
 return response("OK");
 }
 };
-
