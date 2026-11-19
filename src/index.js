@@ -1156,14 +1156,14 @@ if (!text) return;
 if (text.startsWith("/start")) {
 await send(
 chatId,
-"سلام! من Traid هستم 🤖
+`سلام! من Traid هستم 🤖
 
 سیستم تحلیل من سه مرحله دارد:
 ۱۵ دقیقه: جهت بازار
 ۵ دقیقه: فرصت معاملاتی
 ۱ دقیقه: تأیید ورود
 
-ارز موردنظرت را انتخاب کن:",
+ارز موردنظرت را انتخاب کن:`
 env,
 mainKeyboard()
 );
@@ -1227,7 +1227,7 @@ callback_query_id: query.id
 if (data === "menu") {
 await send(
 chatId,
-"🤖 Traid\n\nکدام ارز را تحلیل کنم؟",
+'🤖 Traid\n\nکدام ارز را تحلیل کنم؟',
 env,
 mainKeyboard()
 );
