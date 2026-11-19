@@ -36,6 +36,28 @@ return Response.json({
 ok: true,
 message: "Simple Telegram Bot is running"
 });
+if (request.method === "GET" && url.pathname === "/check-token") {
+try {
+const response = await fetch(
+"https://api.telegram.org/bot" +
+env.TELEGRAM_BOT_TOKEN + "/getMe"
+);
+
+const result = await response.json();
+
+return Response.json({
+token_exists: !!env.TELEGRAM_BOT_TOKEN,
+telegram_ok: result.ok,
+bot_username: result.result?.username || null,
+error: result.description || null
+});
+
+} catch (error) {
+return Response.json({
+token_exists: !!env.TELEGRAM_BOT_TOKEN,
+error: error.message
+}, { status: 500 });
+}
 }
 
 // دریافت پیام تلگرام
