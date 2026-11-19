@@ -17,12 +17,6 @@ const TIMEFRAMES = {
 "15": 900
 };
 
-const LABELS = {
-"1": "۱ دقیقه",
-"5": "۵ دقیقه",
-"15": "۱۵ دقیقه"
-};
-
 // ===============================
 // BASIC
 // ===============================
@@ -332,15 +326,13 @@ if (candles[j].high >= candles[i].high) isHigh = false;
 if (candles[j].low <= candles[i].low) isLow = false;
 }
 
-if (isHigh) highs.push({
-index: i,
-price: candles[i].high
-});
+if (isHigh) {
+highs.push({ index: i, price: candles[i].high });
+}
 
-if (isLow) lows.push({
-index: i,
-price: candles[i].low
-});
+if (isLow) {
+lows.push({ index: i, price: candles[i].low });
+}
 }
 
 return { highs, lows };
@@ -553,7 +545,8 @@ direction: 0,
 score: 0,
 reasons: ["ATR معتبر نیست"],
 atr,
-ema20
+ema20,
+volume: { available: false, ratio: null, direction: 0 }
 };
 }
 
@@ -568,7 +561,6 @@ const breakoutLow = Math.min(...breakoutCandles.map(c => c.low));
 
 const volume = analyzeVolume(candles);
 
-// شکار نقدینگی
 const bullishSweep =
 last.low < priorLow &&
 last.close > priorLow &&
@@ -579,11 +571,9 @@ last.high > priorHigh &&
 last.close < priorHigh &&
 last.close < last.open;
 
-// شکست ساختار کوتاه‌مدت
 const bullishBOS = last.close > breakoutHigh;
 const bearishBOS = last.close < breakoutLow;
 
-// پولبک به EMA
 const nearEMA = Math.abs(last.close - ema20) <= atr * 0.35;
 
 const bullishPullback =
@@ -634,7 +624,6 @@ shortScore++;
 shortReasons.push("پولبک نزولی به EMA20");
 }
 
-// جهت ۱۵ دقیقه فقط امتیاز کمکی است؛ مانع مطلق فرصت خلاف روند نیست.
 if (trendDirection === 1) {
 longScore++;
 longReasons.push("هم‌جهت با روند ۱۵ دقیقه");
@@ -645,7 +634,6 @@ shortScore++;
 shortReasons.push("هم‌جهت با روند ۱۵ دقیقه");
 }
 
-// حجم فقط امتیاز کمکی است.
 if (volume.available && volume.direction === 1) {
 longScore++;
 longReasons.push("حجم متمایل به خرید");
@@ -670,7 +658,6 @@ score = shortScore;
 reasons = shortReasons;
 }
 
-// برای فرصت خلاف روند، وجود شکار نقدینگی الزامی است.
 const counterTrend =
 direction !== 0 &&
 trendDirection !== 0 &&
@@ -722,8 +709,6 @@ reason: "فرصت معاملاتی در تایم‌فریم ۵ دقیقه پید
 }
 
 const last = candles.at(-1);
-const previous = candles.at(-2);
-
 const recent = candles.slice(-5, -1);
 
 const recentHigh = Math.max(...recent.map(c => c.high));
@@ -770,7 +755,6 @@ reason = confirmed
 : "منتظر کندل نزولی و شکست کف کوتاه‌مدت";
 }
 
-// در معامله خلاف روند، تأیید یک دقیقه‌ای باید قوی‌تر باشد.
 if (opportunity.counterTrend && confirmed) {
 const strongerBody = body >= atr * 0.3;
 
@@ -799,12 +783,7 @@ bearishBreak
 // TRADE PLAN
 // ===============================
 
-function buildTradePlan(
-direction,
-entry,
-opportunity,
-confirmation
-) {
+function buildTradePlan(direction, entry, opportunity, confirmation) {
 if (!confirmation.confirmed) return null;
 
 const isLong = direction === 1;
@@ -838,7 +817,6 @@ const risk = Math.abs(entry - stop);
 
 if (!Number.isFinite(risk) || risk <= 0) return null;
 
-// فاصله حد ضرر بیش از حد بزرگ، معامله را حذف می‌کند.
 if (risk > atr * 3) return null;
 
 const multipliers = [1, 1.5, 2, 3];
@@ -877,16 +855,21 @@ opportunity.direction,
 opportunity
 );
 
-const entryPrice = confirmation.price;
-
 const tradePlan = confirmation.confirmed
 ? buildTradePlan(
 opportunity.direction,
-entryPrice,
+confirmation.price,
 opportunity,
 confirmation
 )
 : null;
+
+// اگر حد ضرر معتبر نباشد، ورود تأییدشده محسوب نمی‌شود.
+if (confirmation.confirmed && !tradePlan) {
+confirmation.confirmed = false;
+confirmation.reason =
+"ورود از نظر کندل تأیید شد، اما فاصله حد ضرر بیش از حد مجاز است؛ معامله رد شد.";
+}
 
 const entryConfirmed = Boolean(
 confirmation.confirmed && tradePlan
@@ -963,7 +946,7 @@ function mainReport(name, a) {
 const trend = a.trend;
 const opportunity = a.opportunity;
 
-let report = `📊 ${name} | تحلیل اسکالپ Traid
+return `📊 ${name} | تحلیل اسکالپ Traid
 
 💰 قیمت آخرین کندل ۱ دقیقه: ${format(a.confirmation.price ?? trend.price)}
 
@@ -993,8 +976,6 @@ ${a.entryConfirmed
 ━━━━━━━━━━━━━━
 ⚠️ این ربات معامله را اجرا یا حد ضرر را زنده پایش نمی‌کند.
 ⚠️ تحلیل بر اساس کندل‌های بسته‌شده انجام شده است.`;
-
-return report;
 }
 
 // ===============================
@@ -1104,7 +1085,6 @@ for (const asset of assets) {
 try {
 const symbol = SYMBOLS[asset];
 
-// دریافت سه تایم‌فریم
 const [candles15, candles5, candles1] = await Promise.all([
 getCandles(symbol, "15"),
 getCandles(symbol, "5"),
@@ -1131,6 +1111,8 @@ resultKeyboard(asset, detail)
 );
 
 } catch (error) {
+console.error(`Analysis error for ${asset}:`, error);
+
 await send(
 chatId,
 `❌ خطا در تحلیل ${ASSET_NAMES[asset] || asset}
@@ -1163,7 +1145,7 @@ chatId,
 ۵ دقیقه: فرصت معاملاتی
 ۱ دقیقه: تأیید ورود
 
-ارز موردنظرت را انتخاب کن:`
+ارز موردنظرت را انتخاب کن:`,
 env,
 mainKeyboard()
 );
@@ -1227,7 +1209,9 @@ callback_query_id: query.id
 if (data === "menu") {
 await send(
 chatId,
-'🤖 Traid\n\nکدام ارز را تحلیل کنم؟',
+`🤖 Traid
+
+کدام ارز را تحلیل کنم؟`,
 env,
 mainKeyboard()
 );
