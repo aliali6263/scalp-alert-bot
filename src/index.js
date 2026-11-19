@@ -16,21 +16,6 @@ const TIMEFRAMES = {
 "D": 86400
 };
 
-const WEIGHTS = {
-EMA: 15,
-RSI: 5,
-MACD: 5,
-FIB: 10,
-STRUCTURE: 15,
-SMC: 15,
-VOLUME: 10,
-ORDERBOOK: 10,
-SUPPORT: 10
-};
-
-const MAX_DIRECTIONAL_WEIGHT = Object.values(WEIGHTS)
-.reduce((sum, weight) => sum + weight, 0);
-
 const LABELS = {
 "1": "۱ دقیقه",
 "5": "۵ دقیقه",
@@ -46,14 +31,29 @@ BTC: "بیت‌کوین",
 ETH: "اتریوم"
 };
 
+const WEIGHTS = {
+EMA: 15,
+RSI: 5,
+MACD: 5,
+FIB: 10,
+STRUCTURE: 15,
+SMC: 15,
+VOLUME: 10,
+ORDERBOOK: 10,
+SUPPORT: 10
+};
+
+const MAX_DIRECTIONAL_WEIGHT = Object.values(WEIGHTS)
+.reduce((sum, value) => sum + value, 0);
+
 // ===============================
-// BASIC FUNCTIONS
+// BASIC
 // ===============================
 
 function normalize(text) {
 return String(text || "")
-.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))
-.replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d))
+.replace(/[۰-۹]/g, d => "0123456789"["۰۱۲۳۴۵۶۷۸۹".indexOf(d)])
+.replace(/[٠-٩]/g, d => "0123456789"["٠١٢٣٤٥٦٧٨٩".indexOf(d)])
 .toLowerCase()
 .trim();
 }
@@ -61,9 +61,7 @@ return String(text || "")
 function response(data, status = 200) {
 return new Response(data, {
 status,
-headers: {
-"Content-Type": "text/plain; charset=utf-8"
-}
+headers: { "Content-Type": "text/plain; charset=utf-8" }
 });
 }
 
@@ -72,9 +70,7 @@ const r = await fetch(
 `${TELEGRAM_API}/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,
 {
 method: "POST",
-headers: {
-"Content-Type": "application/json"
-},
+headers: { "Content-Type": "application/json" },
 body: JSON.stringify(body)
 }
 );
@@ -82,9 +78,7 @@ body: JSON.stringify(body)
 const result = await r.json();
 
 if (!r.ok || !result.ok) {
-throw new Error(
-result.description || `Telegram error ${r.status}`
-);
+throw new Error(result.description || `Telegram error ${r.status}`);
 }
 
 return result;
@@ -97,11 +91,19 @@ text,
 disable_web_page_preview: true
 };
 
-if (keyboard) {
-body.reply_markup = keyboard;
-}
+if (keyboard) body.reply_markup = keyboard;
 
 return telegram("sendMessage", env, body);
+}
+
+function format(value) {
+if (value === null || value === undefined || !Number.isFinite(Number(value))) {
+return "ناموجود";
+}
+
+return Number(value).toLocaleString("en-US", {
+maximumFractionDigits: 4
+});
 }
 
 // ===============================
@@ -112,20 +114,11 @@ function mainKeyboard() {
 return {
 inline_keyboard: [
 [
-{
-text: "₿ تحلیل بیت‌کوین",
-callback_data: "asset:BTC"
-},
-{
-text: "Ξ تحلیل اتریوم",
-callback_data: "asset:ETH"
-}
+{ text: "₿ تحلیل بیت‌کوین", callback_data: "asset:BTC" },
+{ text: "Ξ تحلیل اتریوم", callback_data: "asset:ETH" }
 ],
 [
-{
-text: "📊 تحلیل هر دو ارز",
-callback_data: "asset:ALL"
-}
+{ text: "📊 تحلیل هر دو ارز", callback_data: "asset:ALL" }
 ]
 ]
 };
@@ -144,18 +137,11 @@ const buttons = [
 
 return {
 inline_keyboard: [
-...buttons.map(([label, timeframe]) => [
-{
+...buttons.map(([label, tf]) => [{
 text: label,
-callback_data: `tf:${asset}:${timeframe}`
-}
-]),
-[
-{
-text: "🏠 منوی اصلی",
-callback_data: "menu"
-}
-]
+callback_data: `tf:${asset}:${tf}`
+}]),
+[{ text: "🏠 منوی اصلی", callback_data: "menu" }]
 ]
 };
 }
@@ -163,40 +149,22 @@ callback_data: "menu"
 function resultKeyboard(asset, timeframe, detail = false) {
 const keyboard = [];
 
-if (!detail) {
 keyboard.push([
-{
-text: "🔍 جزئیات تحلیل",
-callback_data: `detail:${asset}:${timeframe}`
-}
-]);
-} else {
-keyboard.push([
-{
-text: "📊 گزارش اصلی",
-callback_data: `again:${asset}:${timeframe}`
-}
-]);
-}
-
-keyboard.push([
-{
-text: "🔄 تغییر تایم‌فریم",
-callback_data: `asset:${asset}`
-},
-{
-text: "🏠 منوی اصلی",
-callback_data: "menu"
-}
+detail
+? { text: "📊 گزارش اصلی", callback_data: `again:${asset}:${timeframe}` }
+: { text: "🔍 جزئیات تحلیل", callback_data: `detail:${asset}:${timeframe}` }
 ]);
 
-return {
-inline_keyboard: keyboard
-};
+keyboard.push([
+{ text: "🔄 تغییر تایم‌فریم", callback_data: `asset:${asset}` },
+{ text: "🏠 منوی اصلی", callback_data: "menu" }
+]);
+
+return { inline_keyboard: keyboard };
 }
 
 // ===============================
-// INPUT PARSING
+// INPUT
 // ===============================
 
 function getTimeframe(text) {
@@ -231,9 +199,7 @@ return [];
 }
 
 function isDetail(text) {
-return /جزئیات|تحلیل کامل|اندیکاتور|توضیح بیشتر/.test(
-normalize(text)
-);
+return /جزئیات|تحلیل کامل|اندیکاتور|توضیح بیشتر/.test(normalize(text));
 }
 
 function isAnalysis(text) {
@@ -249,9 +215,7 @@ normalize(text)
 async function getCandles(symbol, resolution) {
 const seconds = TIMEFRAMES[resolution];
 
-if (!seconds) {
-throw new Error("تایم‌فریم پشتیبانی نمی‌شود.");
-}
+if (!seconds) throw new Error("تایم‌فریم پشتیبانی نمی‌شود.");
 
 const now = Math.floor(Date.now() / 1000);
 const url = new URL(`${TRUE_API}/futures/udf/history`);
@@ -264,9 +228,7 @@ url.searchParams.set("resolution", resolution);
 
 const r = await fetch(url.toString());
 
-if (!r.ok) {
-throw new Error(`خطای دریافت کندل: ${r.status}`);
-}
+if (!r.ok) throw new Error(`خطای دریافت کندل: ${r.status}`);
 
 const data = await r.json();
 
@@ -290,10 +252,10 @@ close: Number(data.c[i]),
 volume: Number(data.v?.[i] || 0)
 })).filter(c =>
 Number.isFinite(c.time) &&
-Number.isFinite(c.close) &&
 Number.isFinite(c.open) &&
 Number.isFinite(c.high) &&
 Number.isFinite(c.low) &&
+Number.isFinite(c.close) &&
 c.high >= c.low &&
 c.high >= c.open &&
 c.high >= c.close &&
@@ -308,6 +270,16 @@ throw new Error("تعداد کندل‌های معتبر کافی نیست.");
 }
 
 return candles;
+}
+
+// تمام محاسبات اصلی فقط با کندل بسته‌شده انجام می‌شوند.
+function getClosedCandles(candles, timeframe) {
+const seconds = TIMEFRAMES[timeframe];
+if (!seconds) return [];
+
+const now = Math.floor(Date.now() / 1000);
+
+return candles.filter(c => c.time + seconds <= now);
 }
 
 // ===============================
@@ -330,12 +302,13 @@ return result;
 }
 
 function calculateRSI(values, period = 14) {
+if (values.length <= period) return 50;
+
 let gain = 0;
 let loss = 0;
 
 for (let i = 1; i <= period; i++) {
 const change = values[i] - values[i - 1];
-
 gain += Math.max(change, 0);
 loss += Math.max(-change, 0);
 }
@@ -346,14 +319,11 @@ let avgLoss = loss / period;
 for (let i = period + 1; i < values.length; i++) {
 const change = values[i] - values[i - 1];
 
-avgGain =
-(avgGain * (period - 1) + Math.max(change, 0)) / period;
-
-avgLoss =
-(avgLoss * (period - 1) + Math.max(-change, 0)) / period;
+avgGain = (avgGain * (period - 1) + Math.max(change, 0)) / period;
+avgLoss = (avgLoss * (period - 1) + Math.max(-change, 0)) / period;
 }
 
-if (avgLoss === 0 && avgGain === 0) return 50;
+if (avgGain === 0 && avgLoss === 0) return 50;
 if (avgLoss === 0) return 100;
 if (avgGain === 0) return 0;
 
@@ -363,7 +333,6 @@ return 100 - 100 / (1 + avgGain / avgLoss);
 function calculateMACD(values) {
 const fast = emaSeries(values, 12);
 const slow = emaSeries(values, 26);
-
 const line = values.map((_, i) => fast[i] - slow[i]);
 const signal = emaSeries(line, 9);
 
@@ -393,24 +362,17 @@ Math.abs(c.low - previous)
 
 if (trs.length < period) return 0;
 
-let value =
-trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+let value = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
 
 for (let i = period; i < trs.length; i++) {
-value =
-(value * (period - 1) + trs[i]) / period;
+value = (value * (period - 1) + trs[i]) / period;
 }
 
 return value;
 }
 
 function addSignal(signals, name, direction, weight, note) {
-signals.push({
-name,
-direction,
-weight,
-note
-});
+signals.push({ name, direction, weight, note });
 }
 
 // ===============================
@@ -422,34 +384,17 @@ const highs = [];
 const lows = [];
 
 for (let i = left; i < candles.length - right; i++) {
-let high = true;
-let low = true;
+let isHigh = true;
+let isLow = true;
 
 for (let j = i - left; j <= i + right; j++) {
 if (j === i) continue;
-
-if (candles[j].high >= candles[i].high) {
-high = false;
+if (candles[j].high >= candles[i].high) isHigh = false;
+if (candles[j].low <= candles[i].low) isLow = false;
 }
 
-if (candles[j].low <= candles[i].low) {
-low = false;
-}
-}
-
-if (high) {
-highs.push({
-index: i,
-price: candles[i].high
-});
-}
-
-if (low) {
-lows.push({
-index: i,
-price: candles[i].low
-});
-}
+if (isHigh) highs.push({ index: i, price: candles[i].high });
+if (isLow) lows.push({ index: i, price: candles[i].low });
 }
 
 return { highs, lows };
@@ -457,22 +402,22 @@ return { highs, lows };
 
 function analyzeStructure(candles, price) {
 const p = pivots(candles.slice(-100));
-
 const highs = p.highs;
 const lows = p.lows;
 
 if (highs.length < 2 || lows.length < 2) {
 return {
 direction: 0,
-text: "داده کافی نیست",
+text: "ساختار نامشخص",
 highs,
-lows
+lows,
+lastHigh: null,
+lastLow: null
 };
 }
 
 const h1 = highs.at(-1).price;
 const h0 = highs.at(-2).price;
-
 const l1 = lows.at(-1).price;
 const l0 = lows.at(-2).price;
 
@@ -487,15 +432,12 @@ direction = -1;
 text = "سقف و کف پایین‌تر";
 }
 
-const lastHigh = h1;
-const lastLow = l1;
-
-if (price > lastHigh) {
+if (price > h1) {
 direction = 1;
-text = "شکست سقف اخیر (BOS صعودی)";
-} else if (price < lastLow) {
+text = "شکست سقف اخیر";
+} else if (price < l1) {
 direction = -1;
-text = "شکست کف اخیر (BOS نزولی)";
+text = "شکست کف اخیر";
 }
 
 return {
@@ -503,8 +445,8 @@ direction,
 text,
 highs,
 lows,
-lastHigh,
-lastLow
+lastHigh: h1,
+lastLow: l1
 };
 }
 
@@ -512,24 +454,24 @@ lastLow
 // FIBONACCI
 // ===============================
 
-function analyzeFib(candles, price, trend) {
+// نزدیکی به سطح فیبوناچی به‌تنهایی رأی صعودی یا نزولی نمی‌دهد.
+// رأی فقط با واکنش کندل بسته‌شده در همان محدوده صادر می‌شود.
+function analyzeFib(candles, price, atr) {
 const recent = candles.slice(-100);
-
 const high = Math.max(...recent.map(c => c.high));
 const low = Math.min(...recent.map(c => c.low));
-
 const range = high - low;
 
 if (!Number.isFinite(range) || range <= 0) {
 return {
 direction: 0,
 levels: [],
-note: "سطوح فیبوناچی معتبر نیستند"
+note: "سطوح معتبر نیستند",
+nearest: null
 };
 }
 
-const levels = [0.236, 0.382, 0.5, 0.618, 0.786]
-.map(level => ({
+const levels = [0.236, 0.382, 0.5, 0.618, 0.786].map(level => ({
 level,
 price: high - range * level
 }));
@@ -537,20 +479,23 @@ price: high - range * level
 let nearest = levels[0];
 
 for (const item of levels) {
-if (
-Math.abs(item.price - price) <
-Math.abs(nearest.price - price)
-) {
+if (Math.abs(item.price - price) < Math.abs(nearest.price - price)) {
 nearest = item;
 }
 }
 
-const distance = Math.abs(nearest.price - price) / range;
+const distance = Math.abs(nearest.price - price);
+const last = candles.at(-1);
+const previous = candles.at(-2);
 
 let direction = 0;
 
-if (distance < 0.035 && trend !== 0) {
-direction = trend;
+if (distance <= Math.max(atr * 0.15, range * 0.012)) {
+if (last.close > last.open && last.close > previous.close) {
+direction = 1;
+} else if (last.close < last.open && last.close < previous.close) {
+direction = -1;
+}
 }
 
 return {
@@ -560,8 +505,8 @@ high,
 low,
 nearest,
 note: direction === 0
-? "قیمت نزدیک سطح تعیین‌کننده نیست"
-: `نزدیک فیبوناچی ${(nearest.level * 100).toFixed(1)}٪`
+? `نزدیک سطح ${(nearest.level * 100).toFixed(1)}٪؛ واکنش جهت‌دار تأیید نشد`
+: `واکنش ${direction === 1 ? "صعودی" : "نزولی"} نزدیک فیبوناچی ${(nearest.level * 100).toFixed(1)}٪`
 };
 }
 
@@ -570,15 +515,18 @@ note: direction === 0
 // ===============================
 
 function analyzeVolume(candles) {
+if (candles.length < 31) {
+return { direction: 0, available: false, ratio: null };
+}
+
 const recent = candles.slice(-10);
 const previous = candles.slice(-30, -10);
 
-const avg = arr =>
-arr.reduce((s, c) => s + c.volume, 0) /
-Math.max(1, arr.length);
+const average = arr =>
+arr.reduce((sum, c) => sum + c.volume, 0) / arr.length;
 
-const recentVol = avg(recent);
-const previousVol = avg(previous);
+const recentVol = average(recent);
+const previousVol = average(previous);
 
 if (
 recentVol <= 0 ||
@@ -586,20 +534,16 @@ previousVol <= 0 ||
 !Number.isFinite(recentVol) ||
 !Number.isFinite(previousVol)
 ) {
-return {
-direction: 0,
-available: false,
-ratio: null
-};
+return { direction: 0, available: false, ratio: null };
 }
 
 const upVolume = recent.reduce(
-(s, c) => s + (c.close > c.open ? c.volume : 0),
+(sum, c) => sum + (c.close > c.open ? c.volume : 0),
 0
 );
 
 const downVolume = recent.reduce(
-(s, c) => s + (c.close < c.open ? c.volume : 0),
+(sum, c) => sum + (c.close < c.open ? c.volume : 0),
 0
 );
 
@@ -607,13 +551,8 @@ const ratio = recentVol / previousVol;
 
 let direction = 0;
 
-if (ratio > 1.15 && upVolume > downVolume * 1.2) {
-direction = 1;
-}
-
-if (ratio > 1.15 && downVolume > upVolume * 1.2) {
-direction = -1;
-}
+if (ratio > 1.15 && upVolume > downVolume * 1.2) direction = 1;
+if (ratio > 1.15 && downVolume > upVolume * 1.2) direction = -1;
 
 return {
 direction,
@@ -638,25 +577,17 @@ if (!item) return sum;
 
 const quantity = Array.isArray(item)
 ? Number(item[1])
-: Number(
-item.quantity ??
-item.amount ??
-item.size ??
-item[1]
-);
+: Number(item.quantity ?? item.amount ?? item.size ?? item[1]);
 
-return sum +
-(Number.isFinite(quantity) && quantity > 0
-? quantity
-: 0);
+return sum + (
+Number.isFinite(quantity) && quantity > 0 ? quantity : 0
+);
 }, 0);
 }
 
 async function getOrderBook(symbol) {
 try {
-const url =
-`${TRUE_API}/futures/coinmarketcap/orderbook/${symbol}`;
-
+const url = `${TRUE_API}/futures/coinmarketcap/orderbook/${symbol}`;
 const r = await fetch(url);
 
 if (!r.ok) return null;
@@ -667,14 +598,7 @@ const data = raw.data || raw.result || raw;
 const bids = parseBookSide(data.bids || data.buy);
 const asks = parseBookSide(data.asks || data.sell);
 
-if (
-!Number.isFinite(bids) ||
-!Number.isFinite(asks) ||
-bids <= 0 ||
-asks <= 0
-) {
-return null;
-}
+if (bids <= 0 || asks <= 0) return null;
 
 return {
 bidVolume: bids,
@@ -692,54 +616,25 @@ return null;
 }
 
 // ===============================
-// CONDITIONAL ENTRY PLAN
+// CONDITIONAL ENTRY
 // ===============================
-
-// فقط کندل‌هایی که زمان بسته‌شدنشان گذشته است.
-function getClosedCandles(candles, timeframe) {
-const seconds = TIMEFRAMES[timeframe];
-
-if (!seconds) return [];
-
-const now = Math.floor(Date.now() / 1000);
-
-return candles.filter(c =>
-c.time + seconds <= now
-);
-}
 
 function buildEntryPlan(candles, timeframe) {
 const closed = getClosedCandles(candles, timeframe);
 
-if (closed.length < 50) {
-return null;
-}
+if (closed.length < 50) return null;
 
-// آخرین کندل بسته‌شده، کندل بررسی تأیید است.
 const confirmationCandle = closed.at(-1);
-
-// ۲۰ کندل قبل از کندل تأیید برای تعیین سطح شکست.
 const referenceCandles = closed.slice(-21, -1);
 
-if (referenceCandles.length < 20) {
-return null;
-}
+if (referenceCandles.length !== 20) return null;
 
-const previousHigh = Math.max(
-...referenceCandles.map(c => c.high)
-);
-
-const previousLow = Math.min(
-...referenceCandles.map(c => c.low)
-);
-
+const previousHigh = Math.max(...referenceCandles.map(c => c.high));
+const previousLow = Math.min(...referenceCandles.map(c => c.low));
 const atr = calculateATR(closed);
 
-if (!Number.isFinite(atr) || atr <= 0) {
-return null;
-}
+if (!Number.isFinite(atr) || atr <= 0) return null;
 
-// فاصله کوچک برای جلوگیری از شکست‌های بسیار جزئی.
 const buffer = Math.max(
 atr * 0.05,
 confirmationCandle.close * 0.0001
@@ -752,11 +647,8 @@ const closes = closed.map(c => c.close);
 const macd = calculateMACD(closes);
 const volume = analyzeVolume(closed);
 
-const longPriceConfirmed =
-confirmationCandle.close > longLevel;
-
-const shortPriceConfirmed =
-confirmationCandle.close < shortLevel;
+const longPriceConfirmed = confirmationCandle.close > longLevel;
+const shortPriceConfirmed = confirmationCandle.close < shortLevel;
 
 const longMacdConfirmed =
 macd.histogram > 0 &&
@@ -767,22 +659,10 @@ macd.histogram < 0 &&
 macd.histogram < macd.previousHistogram;
 
 const longVolumeConfirmed =
-volume.available &&
-volume.direction === 1;
+volume.available && volume.direction === 1;
 
 const shortVolumeConfirmed =
-volume.available &&
-volume.direction === -1;
-
-const longConfirmed =
-longPriceConfirmed &&
-longMacdConfirmed &&
-longVolumeConfirmed;
-
-const shortConfirmed =
-shortPriceConfirmed &&
-shortMacdConfirmed &&
-shortVolumeConfirmed;
+volume.available && volume.direction === -1;
 
 return {
 longLevel,
@@ -797,120 +677,95 @@ longMacdConfirmed,
 shortMacdConfirmed,
 longVolumeConfirmed,
 shortVolumeConfirmed,
-longConfirmed,
-shortConfirmed,
+longConfirmed:
+longPriceConfirmed && longMacdConfirmed && longVolumeConfirmed,
+shortConfirmed:
+shortPriceConfirmed && shortMacdConfirmed && shortVolumeConfirmed,
 volumeAvailable: volume.available,
-volumeRatio: volume.ratio,
-macdHistogram: macd.histogram,
-previousMacdHistogram: macd.previousHistogram
+volumeRatio: volume.ratio
 };
 }
 
-function entryPlanText(plan) {
-if (!plan) {
-return `🎯 ورود شرطی
+// ===============================
+// TRADE PLAN
+// ===============================
 
-⚠️ داده کافی از کندل‌های بسته‌شده برای تعیین سطح ورود وجود ندارد.`;
+// حد ضرر و اهداف فقط پس از تأیید ورود هم‌جهت با تحلیل کلی ساخته می‌شوند.
+function buildTradePlan(direction, entryPlan, atr, structure, recentHigh, recentLow) {
+if (!entryPlan || atr <= 0) return null;
+
+const isLong = direction === "LONG";
+const confirmed = isLong
+? entryPlan.longConfirmed
+: entryPlan.shortConfirmed;
+
+if (!confirmed) return null;
+
+const entry = entryPlan.close;
+
+let stop;
+
+if (isLong) {
+const structuralStop = structure.lastLow ?? recentLow;
+stop = Math.min(entry - atr * 1.5, structuralStop - atr * 0.1);
+} else {
+const structuralStop = structure.lastHigh ?? recentHigh;
+stop = Math.max(entry + atr * 1.5, structuralStop + atr * 0.1);
 }
 
-const longStatus = plan.longConfirmed
-? "🟢 تأیید کامل شرایط LONG"
-: plan.longPriceConfirmed
-? "🟡 شکست قیمت انجام شده؛ تأییدهای دیگر کامل نیست"
-: "⏳ هنوز منتظر شکست و بسته‌شدن کندل هستیم";
+const risk = Math.abs(entry - stop);
 
-const shortStatus = plan.shortConfirmed
-? "🔴 تأیید کامل شرایط SHORT"
-: plan.shortPriceConfirmed
-? "🟡 شکست قیمت انجام شده؛ تأییدهای دیگر کامل نیست"
-: "⏳ هنوز منتظر شکست و بسته‌شدن کندل هستیم";
+if (!Number.isFinite(risk) || risk <= 0) return null;
 
-const longChecks = [
-`• بسته‌شدن کندل بالای سطح: ${plan.longPriceConfirmed ? "✅" : "❌"}`,
-`• تأیید MACD صعودی: ${plan.longMacdConfirmed ? "✅" : "❌"}`,
-`• تأیید حجم خرید: ${plan.longVolumeConfirmed ? "✅" : "❌"}`
-].join("\n");
+const multipliers = [1, 1.8, 2.7, 3.7, 5];
+const exits = [15, 20, 20, 20, 25];
 
-const shortChecks = [
-`• بسته‌شدن کندل زیر سطح: ${plan.shortPriceConfirmed ? "✅" : "❌"}`,
-`• تأیید MACD نزولی: ${plan.shortMacdConfirmed ? "✅" : "❌"}`,
-`• تأیید حجم فروش: ${plan.shortVolumeConfirmed ? "✅" : "❌"}`
-].join("\n");
+const targets = multipliers.map(n =>
+isLong ? entry + risk * n : entry - risk * n
+);
 
-return `🎯 سطوح ورود شرطی
-
-🟢 سناریوی LONG
-قیمت فعال‌سازی: ${format(plan.longLevel)}
-سطح شکست قبلی: ${format(plan.previousHigh)}
-وضعیت: ${longStatus}
-
-${longChecks}
-
-🔴 سناریوی SHORT
-قیمت فعال‌سازی: ${format(plan.shortLevel)}
-سطح شکست قبلی: ${format(plan.previousLow)}
-وضعیت: ${shortStatus}
-
-${shortChecks}
-
-📌 قوانین ورود:
-۱. قیمت باید از سطح مشخص‌شده عبور کند.
-۲. کندل تایم‌فریم انتخابی باید آن سوی سطح بسته شود.
-۳. MACD باید جهت شکست را تأیید کند.
-۴. حجم معاملات نیز باید همان جهت را تأیید کند.
-
-${!plan.volumeAvailable
-? "⚠️ داده حجم معتبر نیست؛ بنابراین شرط حجم تأیید نشده است."
-: `نسبت حجم اخیر به قبل: ${format(plan.volumeRatio)} برابر`}
-
-قیمت آخرین کندل بسته‌شده: ${format(plan.close)}
-
-⚠️ اگر همه شروط تأیید نشوند، ورود انجام نده.`;
+return { entry, stop, targets, exits, risk };
 }
 
 // ===============================
-// COMMON ANALYSIS ENGINE
+// ANALYSIS ENGINE
 // ===============================
 
 function analyze(candles, orderBook, timeframe) {
-const closes = candles.map(c => c.close);
+const closed = getClosedCandles(candles, timeframe);
+
+if (closed.length < 100) {
+throw new Error("تعداد کندل‌های بسته‌شده کافی نیست.");
+}
+
+const closes = closed.map(c => c.close);
 const price = closes.at(-1);
 
 const ema20 = emaSeries(closes, 20).at(-1);
 const ema50 = emaSeries(closes, 50).at(-1);
-
 const rsi = calculateRSI(closes);
 const macd = calculateMACD(closes);
-const atr = calculateATR(candles);
+const atr = calculateATR(closed);
 
-const recent = candles.slice(-20);
-
+const recent = closed.slice(-20);
 const recentHigh = Math.max(...recent.map(c => c.high));
 const recentLow = Math.min(...recent.map(c => c.low));
 
-const structure = analyzeStructure(candles, price);
-const fib = analyzeFib(candles, price, structure.direction);
-const volume = analyzeVolume(candles);
-
+const structure = analyzeStructure(closed, price);
+const fib = analyzeFib(closed, price, atr);
+const volume = analyzeVolume(closed);
 const entryPlan = buildEntryPlan(candles, timeframe);
 
 const signals = [];
 
-// EMA
-
 addSignal(
 signals,
 "EMA",
-ema20 > ema50 && price > ema20
-? 1
-: ema20 < ema50 && price < ema20
-? -1
-: 0,
+ema20 > ema50 && price > ema20 ? 1 :
+ema20 < ema50 && price < ema20 ? -1 : 0,
 WEIGHTS.EMA,
 "روند میانگین‌ها"
 );
-
-// RSI
 
 addSignal(
 signals,
@@ -920,33 +775,16 @@ WEIGHTS.RSI,
 "مومنتوم RSI"
 );
 
-// MACD
-
 addSignal(
 signals,
 "MACD",
-macd.histogram > 0 &&
-macd.histogram > macd.previousHistogram
-? 1
-: macd.histogram < 0 &&
-macd.histogram < macd.previousHistogram
-? -1
-: 0,
+macd.histogram > 0 && macd.histogram > macd.previousHistogram ? 1 :
+macd.histogram < 0 && macd.histogram < macd.previousHistogram ? -1 : 0,
 WEIGHTS.MACD,
-"شتاب MACD"
+"جهت و شتاب هیستوگرام"
 );
 
-// Fibonacci
-
-addSignal(
-signals,
-"Fibonacci",
-fib.direction,
-WEIGHTS.FIB,
-fib.note
-);
-
-// Market Structure
+addSignal(signals, "Fibonacci", fib.direction, WEIGHTS.FIB, fib.note);
 
 addSignal(
 signals,
@@ -956,11 +794,9 @@ WEIGHTS.STRUCTURE,
 structure.text
 );
 
-// SMC: شکار نقدینگی
-
-const last = candles.at(-1);
-const prior = candles.slice(-21, -1);
-
+// بررسی شکار نقدینگی روی آخرین کندل بسته‌شده
+const last = closed.at(-1);
+const prior = closed.slice(-21, -1);
 const priorHigh = Math.max(...prior.map(c => c.high));
 const priorLow = Math.min(...prior.map(c => c.low));
 
@@ -969,24 +805,13 @@ let smcText = "شکار نقدینگی تأیید نشد";
 
 if (last.low < priorLow && last.close > priorLow) {
 smcDirection = 1;
-smcText = "احتمال جمع‌آوری نقدینگی زیر کف";
-} else if (
-last.high > priorHigh &&
-last.close < priorHigh
-) {
+smcText = "جمع‌آوری نقدینگی زیر کف و بازگشت قیمت";
+} else if (last.high > priorHigh && last.close < priorHigh) {
 smcDirection = -1;
-smcText = "احتمال جمع‌آوری نقدینگی بالای سقف";
+smcText = "جمع‌آوری نقدینگی بالای سقف و بازگشت قیمت";
 }
 
-addSignal(
-signals,
-"SMC",
-smcDirection,
-WEIGHTS.SMC,
-smcText
-);
-
-// Volume
+addSignal(signals, "SMC", smcDirection, WEIGHTS.SMC, smcText);
 
 if (volume.available) {
 addSignal(
@@ -998,8 +823,6 @@ WEIGHTS.VOLUME,
 );
 }
 
-// Order Book
-
 if (orderBook) {
 addSignal(
 signals,
@@ -1010,22 +833,14 @@ WEIGHTS.ORDERBOOK,
 );
 }
 
-// Support / Resistance
-
 const supportDistance = Math.abs(price - recentLow);
 const resistanceDistance = Math.abs(recentHigh - price);
 
 let supportDirection = 0;
 
-if (
-supportDistance < atr * 0.3 &&
-structure.direction >= 0
-) {
+if (atr > 0 && supportDistance < atr * 0.3 && structure.direction >= 0) {
 supportDirection = 1;
-} else if (
-resistanceDistance < atr * 0.3 &&
-structure.direction <= 0
-) {
+} else if (atr > 0 && resistanceDistance < atr * 0.3 && structure.direction <= 0) {
 supportDirection = -1;
 }
 
@@ -1034,49 +849,26 @@ signals,
 "Support/Resistance",
 supportDirection,
 WEIGHTS.SUPPORT,
-"موقعیت نسبت به سقف و کف اخیر"
+"موقعیت قیمت نسبت به سقف و کف ۲۰ کندل"
 );
 
-// ATR فقط فیلتر نوسان است.
-
-const volatilityRatio = price > 0 ? atr / price : 0;
-
-const atrStatus =
-atr > 0 && volatilityRatio < 0.01
-? "نوسان در محدوده قابل بررسی"
-: "نوسان بالا یا شرایط نامناسب";
-
-// WEIGHTED CALCULATION
-
-const totalWeight = signals.reduce(
-(sum, item) => sum + item.weight,
-0
-);
+const totalWeight = signals.reduce((sum, s) => sum + s.weight, 0);
 
 const upWeight = signals
-.filter(item => item.direction === 1)
-.reduce((sum, item) => sum + item.weight, 0);
+.filter(s => s.direction === 1)
+.reduce((sum, s) => sum + s.weight, 0);
 
 const downWeight = signals
-.filter(item => item.direction === -1)
-.reduce((sum, item) => sum + item.weight, 0);
+.filter(s => s.direction === -1)
+.reduce((sum, s) => sum + s.weight, 0);
 
 const neutralWeight = signals
-.filter(item => item.direction === 0)
-.reduce((sum, item) => sum + item.weight, 0);
+.filter(s => s.direction === 0)
+.reduce((sum, s) => sum + s.weight, 0);
 
-const upPercent = totalWeight
-? Math.round(upWeight / totalWeight * 100)
-: 0;
-
-const downPercent = totalWeight
-? Math.round(downWeight / totalWeight * 100)
-: 0;
-
-const neutralPercent = Math.max(
-0,
-100 - upPercent - downPercent
-);
+const upPercent = totalWeight ? Math.round(upWeight / totalWeight * 100) : 0;
+const downPercent = totalWeight ? Math.round(downWeight / totalWeight * 100) : 0;
+const neutralPercent = Math.max(0, 100 - upPercent - downPercent);
 
 const coveragePercent = Math.round(
 totalWeight / MAX_DIRECTIONAL_WEIGHT * 100
@@ -1101,54 +893,34 @@ direction = "SHORT";
 }
 
 const strength = Math.max(upPercent, downPercent);
-const opposing = Math.min(upPercent, downPercent);
+const volatilityRatio = price > 0 ? atr / price : 0;
 
-// TRADE MANAGEMENT
+const atrStatus =
+atr > 0 && volatilityRatio < 0.01
+? "نوسان در محدوده قابل بررسی"
+: "نوسان بالا یا شرایط نامناسب";
 
-let sl = null;
-let targets = [];
-let exits = [];
+// تأیید ورود باید هم با جهت کلی بازار هم‌جهت باشد.
+let entryConfirmed = false;
 
-if (direction !== "NO TRADE" && atr > 0) {
-const bullish = direction === "LONG";
+if (direction === "LONG" && entryPlan?.longConfirmed) {
+entryConfirmed = true;
+}
 
-const swingStop = bullish
-? Math.min(
-recentLow,
-structure.lastLow || recentLow
-)
-: Math.max(
+if (direction === "SHORT" && entryPlan?.shortConfirmed) {
+entryConfirmed = true;
+}
+
+const tradePlan = entryConfirmed
+? buildTradePlan(
+direction,
+entryPlan,
+atr,
+structure,
 recentHigh,
-structure.lastHigh || recentHigh
-);
-
-const atrStop = bullish
-? price - atr * 1.5
-: price + atr * 1.5;
-
-sl = bullish
-? Math.min(atrStop, swingStop - atr * 0.1)
-: Math.max(atrStop, swingStop + atr * 0.1);
-
-const risk = Math.abs(price - sl);
-const multipliers = [1, 1.8, 2.7, 3.7, 5];
-
-targets = multipliers.map(n =>
-bullish
-? price + risk * n
-: price - risk * n
-);
-
-if (strength >= 75 && opposing <= 10) {
-exits = [10, 15, 20, 25, 30];
-} else if (strength >= 65 && opposing <= 20) {
-exits = [15, 20, 20, 20, 25];
-} else {
-exits = [25, 25, 20, 15, 15];
-}
-} else {
-direction = "NO TRADE";
-}
+recentLow
+)
+: null;
 
 return {
 price,
@@ -1176,221 +948,123 @@ neutralPercent,
 coveragePercent,
 direction,
 strength,
-opposing,
-sl,
-targets,
-exits
+entryConfirmed: Boolean(entryConfirmed && tradePlan),
+tradePlan
 };
 }
 
 // ===============================
-// WAIT GUIDANCE
+// REPORT HELPERS
 // ===============================
 
-function waitGuidance(a) {
-const neutral = a.signals.filter(s => s.direction === 0);
-
-const longConditions = {
-"EMA": "EMA20 بالاتر از EMA50 قرار بگیرد و قیمت بالای EMA20 تثبیت شود.",
-"RSI": "RSI به ۵۵ یا بالاتر برسد.",
-"MACD": "هیستوگرام MACD مثبت باشد و از مقدار کندل قبلی بیشتر شود.",
-"Fibonacci": "قیمت به یکی از سطوح فیبوناچی نزدیک شود و ساختار بازار صعودی باشد.",
-"Market Structure": "ساختار سقف و کف بالاتر یا شکست معتبر سقف اخیر شکل بگیرد.",
-"SMC": "قیمت کف قبلی را بشکند و دوباره بالای آن بسته شود.",
-"Volume": "نسبت حجم از ۱٫۱۵ بیشتر شود و حجم کندل‌های صعودی حداقل ۱٫۲ برابر حجم نزولی باشد.",
-"Order Book": "حجم سفارش‌های خرید حداقل ۱٫۲ برابر سفارش‌های فروش شود.",
-"Support/Resistance": "قیمت به کف ۲۰ کندل اخیر نزدیک شود و ساختار بازار نزولی نباشد."
-};
-
-const shortConditions = {
-"EMA": "EMA20 پایین‌تر از EMA50 قرار بگیرد و قیمت زیر EMA20 تثبیت شود.",
-"RSI": "RSI به ۴۵ یا پایین‌تر برسد.",
-"MACD": "هیستوگرام MACD منفی باشد و از مقدار کندل قبلی کمتر شود.",
-"Fibonacci": "قیمت به یکی از سطوح فیبوناچی نزدیک شود و ساختار بازار نزولی باشد.",
-"Market Structure": "ساختار سقف و کف پایین‌تر یا شکست معتبر کف اخیر شکل بگیرد.",
-"SMC": "قیمت سقف قبلی را بشکند و دوباره پایین‌تر از آن بسته شود.",
-"Volume": "نسبت حجم از ۱٫۱۵ بیشتر شود و حجم کندل‌های نزولی حداقل ۱٫۲ برابر حجم صعودی باشد.",
-"Order Book": "حجم سفارش‌های فروش حداقل ۱٫۲ برابر سفارش‌های خرید شود.",
-"Support/Resistance": "قیمت به سقف ۲۰ کندل اخیر نزدیک شود و ساختار بازار صعودی نباشد."
-};
-
-const makeList = conditions => {
-const available = neutral.filter(s => conditions[s.name]);
-
-if (!available.length) {
-return "روش خنثی قابل‌تبدیل مشخصی در داده‌های فعلی وجود ندارد.";
+function directionText(direction) {
+if (direction === "LONG") return "🟢 صعودی";
+if (direction === "SHORT") return "🔴 نزولی";
+return "⚪ نامشخص";
 }
 
-return available
-.sort((x, y) => y.weight - x.weight)
-.map(s => `• ${s.name} (وزن ${s.weight}): ${conditions[s.name]}`)
-.join("\n");
-};
-
-const missingOrderBook = !a.orderBook;
-
-return `🧭 شرایط خروج از WAIT
-
-🟢 برای فعال‌شدن LONG:
-${makeList(longConditions)}
-
-🔴 برای فعال‌شدن SHORT:
-${makeList(shortConditions)}
-
-📌 شرط نهایی صدور سیگنال:
-• سهم شواهد جهت موردنظر حداقل ۵۸٪ باشد.
-• اختلاف شواهد آن جهت با جهت مخالف حداقل ۱۸ واحد درصد باشد.
-• حداقل ۴ روش معتبر و پوشش وزن حداقل ۴۰٪ وجود داشته باشد.
-• ATR معتبر باشد.
-
-${missingOrderBook
-? "⚠️ داده Order Book موجود نیست و در محاسبه رأی لحاظ نشده است."
-: "Order Book در محاسبه لحاظ شده است."}
-
-این شرایط باید در تحلیل بعدی تأیید شوند؛ صرف نزدیک‌شدن قیمت به یک سطح به‌تنهایی سیگنال ورود نیست.`;
+function entryStatusText(a) {
+if (a.direction === "NO TRADE") {
+return "⚪ جهت مشخصی با شرایط فعلی صادر نشده";
 }
 
-// ===============================
-// CONTRACTS / FUNDING / OI
-// ===============================
-
-async function getContracts() {
-const r = await fetch(
-`${TRUE_API}/futures/coinmarketcap/contracts`
-);
-
-if (!r.ok) return [];
-
-const data = await r.json();
-
-if (Array.isArray(data)) return data;
-if (Array.isArray(data.data)) return data.data;
-if (Array.isArray(data.contracts)) return data.contracts;
-
-return [];
+if (a.entryConfirmed) {
+return a.direction === "LONG"
+? "🟢 ورود LONG تأیید شده"
+: "🔴 ورود SHORT تأیید شده";
 }
 
-function findContract(contracts, symbol) {
-return contracts.find(item => {
-const ticker = String(
-item.ticker_id || ""
-).toUpperCase();
-
-return (
-ticker === `${symbol}-PERP` ||
-ticker === symbol
-);
-});
+return a.direction === "LONG"
+? "🟡 تمایل صعودی؛ فعلاً منتظر تأیید ورود"
+: "🟡 تمایل نزولی؛ فعلاً منتظر تأیید ورود";
 }
 
-// ===============================
-// FORMATTING
-// ===============================
+function entryConditionsText(a) {
+const p = a.entryPlan;
 
-function format(value) {
-if (
-value === null ||
-value === undefined ||
-!Number.isFinite(Number(value))
-) {
-return "ناموجود";
+if (!p) {
+return "داده کافی برای تعیین سطح شکست وجود ندارد.";
 }
 
-return Number(value).toLocaleString("en-US", {
-maximumFractionDigits: 4
-});
+const isLong = a.direction === "LONG";
+const isShort = a.direction === "SHORT";
+
+if (!isLong && !isShort) {
+return `سطح شکست صعودی: ${format(p.longLevel)}
+سطح شکست نزولی: ${format(p.shortLevel)}
+
+برای انتخاب جهت ورود، ابتدا باید جهت کلی بازار مشخص شود.`;
 }
 
-function makeBar(label, percent) {
-const filled = Math.max(
-0,
-Math.min(10, Math.round(percent / 10))
-);
+const priceOk = isLong ? p.longPriceConfirmed : p.shortPriceConfirmed;
+const macdOk = isLong ? p.longMacdConfirmed : p.shortMacdConfirmed;
+const volumeOk = isLong ? p.longVolumeConfirmed : p.shortVolumeConfirmed;
+const level = isLong ? p.longLevel : p.shortLevel;
 
-return `${label}: ${"█".repeat(filled)}${"░".repeat(10 - filled)} ${percent}%`;
+return `سطح فعال‌سازی ${isLong ? "LONG" : "SHORT"}: ${format(level)}
+• بسته‌شدن کندل در سمت شکست: ${priceOk ? "✅" : "❌"}
+• تأیید MACD: ${macdOk ? "✅" : "❌"}
+• تأیید حجم: ${volumeOk ? "✅" : "❌"}`;
+}
+
+function tradePlanText(a) {
+if (!a.entryConfirmed || !a.tradePlan) return "";
+
+const p = a.tradePlan;
+
+return `
+📍 برنامه معامله تأییدشده
+قیمت مبنا: ${format(p.entry)}
+حد ضرر: ${format(p.stop)}
+TP1: ${format(p.targets[0])} | ۱۵٪
+TP2: ${format(p.targets[1])} | ۲۰٪
+TP3: ${format(p.targets[2])} | ۲۰٪
+TP4: ${format(p.targets[3])} | ۲۰٪
+TP5: ${format(p.targets[4])} | ۲۵٪
+
+حد ضرر و اهداف بر اساس قیمت کندل تأییدشده محاسبه شده‌اند.
+ربات معامله را اجرا یا حد ضرر را زنده پایش نمی‌کند.`;
 }
 
 // ===============================
 // MAIN REPORT
 // ===============================
 
-function mainReport(name, timeframe, a, contract) {
-const direction =
-a.direction === "LONG"
-? "🟢 LONG"
+function mainReport(name, timeframe, a) {
+const direction = a.direction === "LONG"
+? "LONG"
 : a.direction === "SHORT"
-? "🔴 SHORT"
-: "⚪ انتظار | NO TRADE";
+? "SHORT"
+: "WAIT";
 
-let text = `📊 تحلیل ${name} | TrueTrade
+let report = `📊 ${name} | ${timeframe}
 
-⏱ تایم‌فریم: ${timeframe}
 💰 قیمت: ${format(a.price)}
+جهت بازار: ${directionText(direction)}
+وضعیت ورود: ${entryStatusText(a)}
 
-وضعیت: ${direction}
+📈 شواهد تحلیل
+صعودی: ${a.upPercent}٪ | نزولی: ${a.downPercent}٪ | خنثی: ${a.neutralPercent}٪
+پوشش داده‌ها: ${a.coveragePercent}٪
 
-📈 همگرایی وزنی تحلیل‌ها
+🎯 بررسی ورود
+${entryConditionsText(a)}`;
 
-${makeBar("صعودی", a.upPercent)}
-${makeBar("خنثی", a.neutralPercent)}
-${makeBar("نزولی", a.downPercent)}
-
-قدرت شواهد: ${a.strength}٪
-پوشش وزن روش‌ها: ${a.coveragePercent}٪
-روش‌های قابل محاسبه: ${a.signals.length} از ۹
-
-${entryPlanText(a.entryPlan)}`;
-
-if (contract) {
-text += `
-
-💵 Funding Rate: ${format(contract.funding_rate)}
-📊 Open Interest: ${format(contract.open_interest)}
-حجم بازار: ${format(contract.base_volume)}`;
-}
-
-if (a.direction !== "NO TRADE") {
-const entryLow = a.direction === "LONG"
-? a.price - a.atr * 0.2
-: a.price - a.atr * 0.05;
-
-const entryHigh = a.direction === "LONG"
-? a.price + a.atr * 0.05
-: a.price + a.atr * 0.2;
-
-text += `
-
-🎯 محدوده ورود بر اساس سیگنال کلی: ${format(entryLow)} تا ${format(entryHigh)}
-🛑 حد ضرر: ${format(a.sl)}
-
-📍 اهداف و تقسیم خروج پویا:
-TP1: ${format(a.targets[0])} | ${a.exits[0]}٪
-TP2: ${format(a.targets[1])} | ${a.exits[1]}٪
-TP3: ${format(a.targets[2])} | ${a.exits[2]}٪
-TP4: ${format(a.targets[3])} | ${a.exits[3]}٪
-TP5: ${format(a.targets[4])} | ${a.exits[4]}٪
-
-🧭 مدیریت معامله:
-• درصدها سهم خروج از حجم اولیه‌اند.
-• پس از هر هدف، ساختار و قدرت روند باید دوباره بررسی شود.
-• انتقال حد ضرر به نقطه ورود فقط پس از تأیید شرایط انجام شود.
-• شکست ساختار در خلاف جهت، هشدار خروج یا کاهش حجم است.
-• حد ضرر کلوزی: بسته‌شدن کندل در آن سوی سطح SL؛ این ربات آن را زنده پایش نمی‌کند.`;
+if (a.entryConfirmed) {
+report += tradePlanText(a);
 } else {
-text += `
+report += `
 
-⛔ شواهد برای ورود کافی نیست.
-فعلاً از ورود اجباری خودداری کن.
-
-${waitGuidance(a)}`;
+⛔ فعلاً وارد معامله نشو.
+تا تأیید همه شروط ورود منتظر بمان.`;
 }
 
-text += `
+report += `
 
-⚠️ درصدها سهم شواهد تحلیل‌اند، نه احتمال سود.
-⚠️ سطح ورود شرطی با محدوده ورود سیگنال کلی متفاوت است.`;
+⚠️ درصدها سهم شواهد هستند، نه احتمال سود.
+⚠️ این ربات معامله را اجرا یا بازار را به‌صورت زنده پایش نمی‌کند.`;
 
-return text;
+return report;
 }
 
 // ===============================
@@ -1400,12 +1074,9 @@ return text;
 function detailReport(name, timeframe, a) {
 const methodLines = a.signals.map(s =>
 `${s.name}: ${
-s.direction === 1
-? "صعودی"
-: s.direction === -1
-? "نزولی"
-: "خنثی"
-} | وزن ${s.weight}٪
+s.direction === 1 ? "صعودی" :
+s.direction === -1 ? "نزولی" : "خنثی"
+} | وزن ${s.weight}
 ${s.note}`
 ).join("\n\n");
 
@@ -1415,18 +1086,12 @@ const fibLines = a.fib.levels.length
 ).join("\n")
 : "سطوح معتبر موجود نیست";
 
-const direction =
-a.direction === "LONG"
-? "🟢 LONG"
-: a.direction === "SHORT"
-? "🔴 SHORT"
-: "⚪ انتظار";
-
-let report = `🔬 جزئیات تحلیل ${name}
+let report = `🔬 جزئیات ${name}
 
 ⏱ تایم‌فریم: ${timeframe}
-💰 قیمت: ${format(a.price)}
-وضعیت نهایی: ${direction}
+💰 قیمت آخرین کندل بسته‌شده: ${format(a.price)}
+
+وضعیت: ${entryStatusText(a)}
 
 EMA 20: ${format(a.ema20)}
 EMA 50: ${format(a.ema50)}
@@ -1441,51 +1106,42 @@ ATR 14: ${format(a.atr)}
 
 📐 فیبوناچی
 ${fibLines}
-نزدیک‌ترین سطح: ${a.fib.note}
+${a.fib.note}
 
-📊 ساختار بازار:
+📊 ساختار بازار
 ${a.structure.text}
 
-💧 حجم:
+💧 حجم
 ${a.volume.available
 ? `نسبت حجم اخیر به قبل: ${format(a.volume.ratio)}`
 : "داده حجم معتبر موجود نیست"}
 
-📚 Order Book:
+📚 Order Book
 ${a.orderBook
-? `نسبت حجم خرید به فروش: ${format(a.orderBook.ratio)}`
+? `نسبت خرید به فروش: ${format(a.orderBook.ratio)}`
 : "داده معتبر دریافت نشد"}
 
-📈 روش‌های تحلیل و سهم آن‌ها:
+📈 روش‌های تحلیل
 ${methodLines}
 
-📊 نتیجه وزنی مشترک:
+📊 جمع‌بندی شواهد
 صعودی: ${a.upPercent}٪
-خنثی: ${a.neutralPercent}٪
 نزولی: ${a.downPercent}٪
+خنثی: ${a.neutralPercent}٪
+وزن معتبر: ${a.totalWeight} از ${MAX_DIRECTIONAL_WEIGHT}
+پوشش داده‌ها: ${a.coveragePercent}٪
 
-وزن معتبر محاسبه‌شده: ${a.totalWeight} از ${MAX_DIRECTIONAL_WEIGHT}
-پوشش وزن روش‌ها: ${a.coveragePercent}٪
-
-📏 فیلتر نوسان ATR:
+📏 وضعیت نوسان
 ${a.atrStatus}
 
-ATR در تشخیص جهت رأی نمی‌دهد و فقط برای ارزیابی نوسان و مدیریت ریسک استفاده می‌شود.
+🎯 بررسی ورود
+${entryConditionsText(a)}
+${a.entryConfirmed ? tradePlanText(a) : "\n⛔ ورود تأیید نشده است؛ فعلاً معامله نکن."}
 
-${entryPlanText(a.entryPlan)}
+CVD واقعی پیاده‌سازی نشده است.
+SMC فعلی بررسی ساده شکار نقدینگی است و مدل کامل SMC نیست.
 
-CVD واقعی: هنوز پیاده‌سازی نشده است.
-SMC فعلی بر اساس بررسی ساده شکار نقدینگی است و مدل کامل SMC نیست.`;
-
-if (a.direction === "NO TRADE") {
-report += `
-
-${waitGuidance(a)}`;
-}
-
-report += `
-
-⚠️ درصدها قدرت شواهد هستند، نه احتمال قطعی سود.`;
+⚠️ درصدها سهم شواهد هستند، نه احتمال قطعی سود.`;
 
 return report;
 }
@@ -1497,45 +1153,24 @@ return report;
 async function runAnalysis(chatId, assets, timeframe, detail, env) {
 await send(
 chatId,
-"⏳ در حال دریافت داده‌های TrueTrade و تحلیل چندروشی...",
+"⏳ در حال دریافت داده‌های TrueTrade و بررسی کندل‌های بسته‌شده...",
 env
 );
-
-let contracts = [];
-
-try {
-contracts = await getContracts();
-} catch {
-contracts = [];
-}
 
 for (const asset of assets) {
 try {
 const symbol = SYMBOLS[asset];
-
-const candles = await getCandles(
-symbol,
-timeframe
-);
+const candles = await getCandles(symbol, timeframe);
+const closed = getClosedCandles(candles, timeframe);
 
 const orderBook = await getOrderBook(symbol);
-const result = analyze(candles, orderBook, timeframe);
-
-const contract = findContract(
-contracts,
-symbol
-);
+const result = analyze(closed, orderBook, timeframe);
 
 const name = ASSET_NAMES[asset];
 
 const report = detail
 ? detailReport(name, LABELS[timeframe], result)
-: mainReport(
-name,
-LABELS[timeframe],
-result,
-contract
-);
+: mainReport(name, LABELS[timeframe], result);
 
 await send(
 chatId,
@@ -1543,11 +1178,11 @@ report,
 env,
 resultKeyboard(asset, timeframe, detail)
 );
-
 } catch (error) {
 await send(
 chatId,
-`❌ خطا در تحلیل ${ASSET_NAMES[asset] || asset}\n${error.message}`,
+`❌ خطا در تحلیل ${ASSET_NAMES[asset] || asset}
+${error.message}`,
 env,
 mainKeyboard()
 );
@@ -1556,7 +1191,7 @@ mainKeyboard()
 }
 
 // ===============================
-// PROCESS TEXT MESSAGE
+// PROCESS TEXT
 // ===============================
 
 async function processMessage(message, env) {
@@ -1600,18 +1235,12 @@ const assets = getAssets(originalText);
 const timeframe = getTimeframe(originalText);
 
 if (!assets.length) {
-await send(
-chatId,
-"کدام ارز را تحلیل کنم؟",
-env,
-mainKeyboard()
-);
+await send(chatId, "کدام ارز را تحلیل کنم؟", env, mainKeyboard());
 return;
 }
 
 if (!timeframe) {
-const selectedAsset =
-assets.length === 2 ? "ALL" : assets[0];
+const selectedAsset = assets.length === 2 ? "ALL" : assets[0];
 
 await send(
 chatId,
@@ -1632,7 +1261,7 @@ env
 }
 
 // ===============================
-// PROCESS BUTTON CLICKS
+// CALLBACKS
 // ===============================
 
 async function processCallback(query, env) {
@@ -1646,24 +1275,16 @@ callback_query_id: query.id
 });
 
 if (data === "menu") {
-await send(
-chatId,
-"🤖 Traid\n\nکدام ارز را تحلیل کنم؟",
-env,
-mainKeyboard()
-);
+await send(chatId, "🤖 Traid\n\nکدام ارز را تحلیل کنم؟", env, mainKeyboard());
 return;
 }
 
 const parts = data.split(":");
-
 const action = parts[0];
 const asset = parts[1];
 
 if (action === "asset") {
-if (!["BTC", "ETH", "ALL"].includes(asset)) {
-return;
-}
+if (!["BTC", "ETH", "ALL"].includes(asset)) return;
 
 await send(
 chatId,
@@ -1687,29 +1308,16 @@ return;
 }
 
 if (action === "tf") {
-if (!["BTC", "ETH", "ALL"].includes(asset)) {
-return;
-}
+if (!["BTC", "ETH", "ALL"].includes(asset)) return;
 
-const assets = asset === "ALL"
-? ["BTC", "ETH"]
-: [asset];
+const assets = asset === "ALL" ? ["BTC", "ETH"] : [asset];
 
-await runAnalysis(
-chatId,
-assets,
-timeframe,
-false,
-env
-);
-
+await runAnalysis(chatId, assets, timeframe, false, env);
 return;
 }
 
 if (action === "detail" || action === "again") {
-if (!["BTC", "ETH"].includes(asset)) {
-return;
-}
+if (!["BTC", "ETH"].includes(asset)) return;
 
 await runAnalysis(
 chatId,
@@ -1718,8 +1326,6 @@ timeframe,
 action === "detail",
 env
 );
-
-return;
 }
 }
 
@@ -1731,25 +1337,17 @@ export default {
 async fetch(request, env) {
 const url = new URL(request.url);
 
-if (
-url.pathname === "/" &&
-request.method === "GET"
-) {
+if (url.pathname === "/" && request.method === "GET") {
 return response("Traid is running");
 }
 
-if (
-url.pathname !== "/telegram" ||
-request.method !== "POST"
-) {
+if (url.pathname !== "/telegram" || request.method !== "POST") {
 return response("Not found", 404);
 }
 
 if (
 env.WEBHOOK_SECRET &&
-request.headers.get(
-"X-Telegram-Bot-Api-Secret-Token"
-) !== env.WEBHOOK_SECRET
+request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.WEBHOOK_SECRET
 ) {
 return response("Unauthorized", 401);
 }
@@ -1772,10 +1370,7 @@ console.error("Bot error:", error);
 
 if (update.callback_query) {
 try {
-await processCallback(
-update.callback_query,
-env
-);
+await processCallback(update.callback_query, env);
 } catch (error) {
 console.error("Callback error:", error);
 }
