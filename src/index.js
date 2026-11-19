@@ -30,20 +30,17 @@ export default {
 async fetch(request, env) {
 const url = new URL(request.url);
 
-// تست سلامت Worker
 if (request.method === "GET" && url.pathname === "/") {
 return Response.json({
 ok: true,
-message: "Simple Telegram Bot is running"
+message: "Telegram Bot is running"
 });
 }
 
-// تست اعتبار توکن تلگرام
 if (request.method === "GET" && url.pathname === "/check-token") {
 try {
 const response = await fetch(
-"https://api.telegram.org/bot" +
-env.TELEGRAM_BOT_TOKEN + "/getMe"
+`${TELEGRAM_API}/bot${env.TELEGRAM_BOT_TOKEN}/getMe`
 );
 
 const result = await response.json();
@@ -54,7 +51,6 @@ telegram_ok: result.ok,
 bot_username: result.result?.username || null,
 error: result.description || null
 });
-
 } catch (error) {
 return Response.json({
 token_exists: !!env.TELEGRAM_BOT_TOKEN,
@@ -63,21 +59,32 @@ error: error.message
 }
 }
 
-// دریافت پیام تلگرام
 if (request.method === "POST" && url.pathname === "/telegram") {
 try {
 if (!env.TELEGRAM_BOT_TOKEN) {
 throw new Error("TELEGRAM_BOT_TOKEN is missing");
 }
 
+if (!env.WEBHOOK_SECRET) {
+throw new Error("WEBHOOK_SECRET is missing");
+}
+
+const receivedSecret = request.headers.get(
+"x-telegram-bot-api-secret-token"
+);
+
+if (receivedSecret !== env.WEBHOOK_SECRET) {
+return Response.json(
+{ ok: false, error: "Unauthorized" },
+{ status: 401 }
+);
+}
+
 const update = await request.json();
 const message = update.message;
 
 if (!message || !message.chat || !message.chat.id) {
-return Response.json({
-ok: true,
-message: "No text message to process"
-});
+return Response.json({ ok: true });
 }
 
 const chatId = message.chat.id;
@@ -90,11 +97,9 @@ return Response.json({ ok: true });
 let reply;
 
 if (text.trim() === "/start") {
-reply =
-"سلام! ربات فعاله. پیام شما دریافت شد.";
+reply = "سلام! ربات فعاله. پیام شما دریافت شد.";
 } else {
-reply =
-"پیام شما دریافت شد:\n" + text;
+reply = "پیام شما دریافت شد:\n" + text;
 }
 
 await sendMessage(
@@ -130,4 +135,3 @@ return Response.json(
 );
 }
 };
-
